@@ -12,8 +12,10 @@ const NORMAL_PUMP = new THREE.Color('#64727b');
 const WARNING_PUMP = new THREE.Color('#a97838');
 const DANGER_PUMP = new THREE.Color('#b94a3d');
 const STEAM_FLOW = new THREE.Color('#c9fbff');
-const HEAT_FLOW = new THREE.Color('#f39a3f');
 const OIL_FLOW = new THREE.Color('#f2c35b');
+const STEAM_ACTIVE = new THREE.Color('#efffff');
+const OIL_ACTIVE = new THREE.Color('#ffe39b');
+const STEAM_PLUME_CENTER = { x: -0.9, y: -4.18, z: -0.38 };
 
 export function createAnimationController(objects) {
   let targetState = deriveTwinState(DEFAULT_OPERATION);
@@ -60,16 +62,8 @@ export function createAnimationController(objects) {
       displayState.mobilityIndex,
       displayState.oilFlowDirection,
     );
-    updateFlow(
-      objects.UnifiedProcessFlow,
-      'process',
-      elapsed,
-      displayState.oilFlowSpeed + displayState.steamFlowSpeed * 0.35,
-      Math.max(displayState.thermalIndex, displayState.productionIndex),
-      Math.max(displayState.mobilityIndex, displayState.steamActivity),
-      displayState.oilFlowDirection,
-    );
-    updateConnectedSystemVisuals(elapsed);
+    updateSeparatedFlowVisuals(elapsed);
+    updateSteamPlume(elapsed);
     updateRiskVisuals(elapsed);
   }
 
@@ -187,50 +181,78 @@ export function createAnimationController(objects) {
       0.22 + displayState.productionIndex * 0.54;
   }
 
-  function updateConnectedSystemVisuals(elapsed) {
-    const systemIntensity = Math.max(
-      displayState.thermalIndex,
-      displayState.productionIndex,
-      displayState.mobilityIndex,
+  function updateSeparatedFlowVisuals(elapsed) {
+    const steamIntensity = Math.max(
+      displayState.steamActivity,
+      displayState.thermalIndex * 0.65,
     );
-    const pulse =
-      1 + Math.sin(elapsed * 5.4) * 0.04 * (0.35 + displayState.productionIndex);
+    const oilIntensity = Math.max(
+      displayState.productionIndex,
+      displayState.mobilityIndex * 0.72,
+    );
 
-    objects.ProcessSpine.material.opacity = 0.12 + systemIntensity * 0.28;
     objects.SteamFlowConduit.material.opacity =
-      0.2 + displayState.steamActivity * 0.32 + displayState.thermalIndex * 0.18;
+      0.18 + displayState.steamActivity * 0.36 + displayState.thermalIndex * 0.14;
+    objects.SteamFlowConduit.material.color
+      .copy(STEAM_FLOW)
+      .lerp(STEAM_ACTIVE, steamIntensity * 0.35);
+    objects.SteamFlowConduit.material.emissiveIntensity =
+      0.2 + steamIntensity * 0.52;
+
     objects.OilFlowConduit.material.opacity =
-      0.2 + displayState.productionIndex * 0.34 + displayState.mobilityIndex * 0.18;
+      (0.18 + displayState.productionIndex * 0.36 + displayState.mobilityIndex * 0.18) *
+      (displayState.oilFlowDirection === 'stalled' ? 0.5 : 1);
+    objects.OilFlowConduit.material.color
+      .copy(OIL_FLOW)
+      .lerp(OIL_ACTIVE, oilIntensity * 0.28);
+    objects.OilFlowConduit.material.emissiveIntensity = 0.16 + oilIntensity * 0.42;
 
-    objects.ProcessJunctions.children.forEach((node, index) => {
-      const phase = Math.sin(elapsed * 4.2 + index * 0.85) * 0.5 + 0.5;
-      node.scale.setScalar(pulse + phase * 0.08 * systemIntensity);
-      node.material.opacity = 0.24 + systemIntensity * 0.36 + phase * 0.14;
-      node.material.color.copy(HEAT_FLOW).lerp(OIL_FLOW, index / 3);
+    objects.FlowJunctions.children.forEach((node, index) => {
+      const isSteam = node.userData.flowType === 'steam';
+      const intensity = isSteam ? steamIntensity : oilIntensity;
+      const pulseSpeed = isSteam ? 4.1 : 5.2;
+      const phase =
+        Math.sin(elapsed * pulseSpeed + index * 0.85) * 0.5 + 0.5;
+      const baseScale = isSteam ? 0.88 : 0.94;
+      node.scale.setScalar(baseScale + phase * 0.16 * intensity);
+      node.material.opacity = 0.22 + intensity * 0.42 + phase * 0.12;
+      node.material.color
+        .copy(isSteam ? STEAM_FLOW : OIL_FLOW)
+        .lerp(isSteam ? STEAM_ACTIVE : OIL_ACTIVE, phase * 0.35);
     });
+  }
 
-    const processCurve = objects.UnifiedProcessFlow.geometry.userData.curve;
-    const directionFactor =
-      displayState.oilFlowDirection === 'reverse'
-        ? -1
-        : displayState.oilFlowDirection === 'stalled'
-          ? 0
-          : 1;
-    const tracerRate =
-      (0.035 + displayState.oilFlowSpeed * 0.035 + displayState.steamFlowSpeed * 0.018) *
-      directionFactor;
+  function updateSteamPlume(elapsed) {
+    const plume = objects.SteamReservoirPlume;
+    const positionAttribute = plume.geometry.getAttribute('position');
+    const positions = positionAttribute.array;
+    const { seeds } = plume.geometry.userData;
+    const activity = Math.max(
+      displayState.steamActivity,
+      displayState.thermalIndex * 0.45,
+    );
 
-    objects.ProcessTracers.children.forEach((tracer, index) => {
-      const t = wrap01(tracer.userData.seed + elapsed * tracerRate);
-      const phase = Math.sin(elapsed * 5.8 + index) * 0.5 + 0.5;
-      const point = processCurve.getPointAt(t);
-      tracer.position.copy(point);
-      tracer.scale.setScalar(0.82 + phase * 0.32 + systemIntensity * 0.42);
-      tracer.material.opacity =
-        (0.38 + phase * 0.22 + systemIntensity * 0.34) *
-        (displayState.oilFlowDirection === 'stalled' ? 0.42 : 1);
-      tracer.material.color.copy(getProcessColor(t, systemIntensity));
-    });
+    for (let index = 0; index < positionAttribute.count; index += 1) {
+      const seed = seeds[index];
+      const t = wrap01(seed + elapsed * (0.025 + activity * 0.08));
+      const radius =
+        (0.12 + t * (0.55 + displayState.thermalIndex * 0.75)) *
+        (0.65 + seed * 0.5);
+      const angle = seed * Math.PI * 2 + elapsed * (0.35 + activity * 0.5);
+      const offset = index * 3;
+
+      positions[offset] = STEAM_PLUME_CENTER.x + Math.cos(angle) * radius;
+      positions[offset + 1] =
+        STEAM_PLUME_CENTER.y +
+        Math.sin(t * Math.PI) * 0.16 +
+        (seed - 0.5) * 0.18;
+      positions[offset + 2] =
+        STEAM_PLUME_CENTER.z + Math.sin(angle) * radius * 0.62;
+    }
+
+    plume.material.opacity = 0.1 + activity * 0.62;
+    plume.material.size = 0.055 + activity * 0.075;
+    positionAttribute.needsUpdate = true;
   }
 
   function updateRiskVisuals(elapsed) {
@@ -276,7 +298,6 @@ function updateFlow(
 
   if (curve) {
     updateCurveFlow({
-      colors: flow.geometry.getAttribute('color'),
       count,
       curve,
       direction,
@@ -347,7 +368,6 @@ function updateFlow(
 }
 
 function updateCurveFlow({
-  colors,
   count,
   curve,
   direction,
@@ -361,7 +381,6 @@ function updateCurveFlow({
   seeds,
   type,
 }) {
-  const colorArray = colors?.array;
   const point = new THREE.Vector3();
   const tangent = new THREE.Vector3();
   const normal = new THREE.Vector3();
@@ -377,10 +396,7 @@ function updateCurveFlow({
     if (normal.lengthSq() < 0.001) normal.set(1, 0, 0);
     binormal.crossVectors(tangent, normal).normalize();
 
-    const radius =
-      type === 'process'
-        ? 0.055 + Math.sin(seed * 19 + elapsed * 3.2) * 0.016
-        : 0.035 + seed * 0.035;
+    const radius = type === 'steam' ? 0.026 + seed * 0.03 : 0.035 + seed * 0.035;
     const angle = seed * Math.PI * 2 + elapsed * (type === 'steam' ? 1.4 : 2.2);
     const offset = index * 3;
 
@@ -396,37 +412,17 @@ function updateCurveFlow({
       point.z +
       normal.z * Math.cos(angle) * radius +
       binormal.z * Math.sin(angle) * radius;
-
-    if (colorArray) {
-      const color = getProcessColor(t, intensity);
-      colorArray[offset] = color.r;
-      colorArray[offset + 1] = color.g;
-      colorArray[offset + 2] = color.b;
-    }
   }
 
-  if (colors) colors.needsUpdate = true;
   flow.material.opacity =
     type === 'steam'
       ? (0.08 + intensity * 0.18 + secondaryIntensity * 0.58) * visibleFactor
-      : type === 'process'
-        ? (0.18 + intensity * 0.34 + secondaryIntensity * 0.2) * visibleFactor
-        : (0.08 + intensity * 0.5 + secondaryIntensity * 0.24) * visibleFactor;
+      : (0.08 + intensity * 0.5 + secondaryIntensity * 0.24) * visibleFactor;
   flow.material.size =
     type === 'steam'
       ? 0.034 + intensity * 0.022 + secondaryIntensity * 0.036
-      : type === 'process'
-        ? 0.046 + intensity * 0.042 + secondaryIntensity * 0.022
-        : 0.032 + intensity * 0.05 + secondaryIntensity * 0.018;
+      : 0.032 + intensity * 0.05 + secondaryIntensity * 0.018;
   positionAttribute.needsUpdate = true;
-}
-
-function getProcessColor(t, intensity) {
-  const color =
-    t < 0.44
-      ? STEAM_FLOW.clone().lerp(HEAT_FLOW, t / 0.44)
-      : HEAT_FLOW.clone().lerp(OIL_FLOW, (t - 0.44) / 0.56);
-  return color.lerp(new THREE.Color('#fff4b6'), intensity * 0.18);
 }
 
 function wrap01(value) {

@@ -6,12 +6,11 @@ export const TWIN_OBJECT_NAMES = [
   'SteamInjector',
   'SteamFlow',
   'SteamFlowConduit',
+  'SteamReservoirPlume',
   'ProductionTubing',
   'OilFlow',
   'OilFlowConduit',
-  'UnifiedProcessFlow',
-  'ProcessSpine',
-  'ProcessTracers',
+  'FlowJunctions',
   'WellboreLiquid',
   'SuckerRod',
   'SRPPump',
@@ -29,7 +28,6 @@ export function createWellModel() {
   const objects = {};
   const steamRoute = createSteamRoute();
   const oilRoute = createOilRoute();
-  const processRoute = createProcessRoute(steamRoute, oilRoute);
 
   const reservoir = new THREE.Mesh(
     new THREE.BoxGeometry(7.8, 1.05, 4.5, 8, 1, 4),
@@ -155,6 +153,10 @@ export function createWellModel() {
   objects.SteamFlow = steamFlow;
   group.add(steamFlow);
 
+  const steamPlume = createSteamPlume(materials);
+  objects.SteamReservoirPlume = steamPlume;
+  group.add(steamPlume);
+
   const oilConduit = createTubePath(
     'OilFlowConduit',
     oilRoute,
@@ -175,35 +177,9 @@ export function createWellModel() {
   objects.OilFlow = oilFlow;
   group.add(oilFlow);
 
-  const processSpine = createTubePath(
-    'ProcessSpine',
-    processRoute,
-    0.044,
-    materials.processSpine,
-  );
-  processSpine.renderOrder = 4;
-  objects.ProcessSpine = processSpine;
-  group.add(processSpine);
-
-  const processFlow = createParticleFlow(
-    'UnifiedProcessFlow',
-    240,
-    materials.processParticles,
-    'process',
-    processRoute,
-  );
-  processFlow.renderOrder = 5;
-  objects.UnifiedProcessFlow = processFlow;
-  group.add(processFlow);
-
-  const processTracers = createProcessTracers(materials);
-  processTracers.renderOrder = 6;
-  objects.ProcessTracers = processTracers;
-  group.add(processTracers);
-
-  const processJunctions = createProcessJunctions(materials);
-  objects.ProcessJunctions = processJunctions;
-  group.add(processJunctions);
+  const flowJunctions = createFlowJunctions(materials);
+  objects.FlowJunctions = flowJunctions;
+  group.add(flowJunctions);
 
   const surfaceProductionLine = createCylinderBetween(
     new THREE.Vector3(0, 0.98, 0.08),
@@ -345,6 +321,14 @@ function createMaterials() {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     }),
+    steamPlume: new THREE.PointsMaterial({
+      color: '#c9fbff',
+      size: 0.085,
+      transparent: true,
+      opacity: 0.58,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
     oil: new THREE.MeshBasicMaterial({
       color: '#d4b05b',
       transparent: true,
@@ -377,32 +361,14 @@ function createMaterials() {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     }),
-    processSpine: new THREE.MeshBasicMaterial({
-      color: '#fff1a8',
+    steamJunction: new THREE.MeshBasicMaterial({
+      color: '#c9fbff',
       transparent: true,
-      opacity: 0.36,
-      depthTest: false,
+      opacity: 0.56,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     }),
-    processParticles: new THREE.PointsMaterial({
-      size: 0.088,
-      transparent: true,
-      opacity: 0.92,
-      depthTest: false,
-      depthWrite: false,
-      vertexColors: true,
-      blending: THREE.AdditiveBlending,
-    }),
-    tracer: new THREE.MeshBasicMaterial({
-      color: '#fff1a8',
-      transparent: true,
-      opacity: 0.92,
-      depthTest: false,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    }),
-    junction: new THREE.MeshBasicMaterial({
+    oilJunction: new THREE.MeshBasicMaterial({
       color: '#f4d77a',
       transparent: true,
       opacity: 0.58,
@@ -472,15 +438,14 @@ function createSteamRoute() {
     new THREE.Vector3(-2.25, -0.62, -0.1),
     new THREE.Vector3(-1.72, -2.55, -0.1),
     new THREE.Vector3(-1.15, -4.28, -0.1),
-    new THREE.Vector3(-0.35, -4.18, 0.02),
+    new THREE.Vector3(-0.9, -4.18, -0.38),
   ];
 }
 
 function createOilRoute() {
   return [
-    new THREE.Vector3(-1.72, -4.14, 0.24),
-    new THREE.Vector3(-0.78, -4.24, 0.18),
-    new THREE.Vector3(-0.2, -4.82, 0.08),
+    new THREE.Vector3(-0.72, -5.08, 0.44),
+    new THREE.Vector3(-0.34, -5.32, 0.26),
     new THREE.Vector3(0, -5.48, 0.06),
     new THREE.Vector3(0, -3.2, 0.08),
     new THREE.Vector3(0, -0.65, 0.08),
@@ -488,14 +453,6 @@ function createOilRoute() {
     new THREE.Vector3(1.18, 0.98, 0.08),
     new THREE.Vector3(2.42, 0.98, 0.08),
     new THREE.Vector3(3.42, 0.68, 0.08),
-  ];
-}
-
-function createProcessRoute(steamRoute, oilRoute) {
-  return [
-    ...steamRoute,
-    new THREE.Vector3(-0.1, -4.24, 0.08),
-    ...oilRoute.slice(2),
   ];
 }
 
@@ -512,44 +469,50 @@ function createTubePath(name, route, radius, material) {
   return tube;
 }
 
-function createProcessJunctions(materials) {
+function createSteamPlume(materials) {
+  const count = 90;
+  const positions = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+
+  for (let index = 0; index < count; index += 1) {
+    seeds[index] = seeded(index + 240);
+    positions[index * 3] = -0.9;
+    positions[index * 3 + 1] = -4.18;
+    positions[index * 3 + 2] = -0.38;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.userData = { seeds };
+
+  const plume = new THREE.Points(geometry, materials.steamPlume);
+  plume.name = 'SteamReservoirPlume';
+  return plume;
+}
+
+function createFlowJunctions(materials) {
   const junctions = new THREE.Group();
-  junctions.name = 'ProcessJunctions';
+  junctions.name = 'FlowJunctions';
 
   [
-    ['SteamReservoirJunction', [-0.35, -4.18, 0.02], 0.18],
-    ['PumpIntakeJunction', [0, -5.48, 0.06], 0.14],
-    ['WellheadJunction', [0, 0.98, 0.08], 0.13],
-    ['SurfaceReceiverJunction', [3.42, 0.68, 0.08], 0.16],
-  ].forEach(([name, position, radius]) => {
+    ['SteamOutletJunction', [-0.9, -4.18, -0.38], 0.18, 'steam'],
+    ['OilIntakeJunction', [0, -5.48, 0.06], 0.14, 'oil'],
+    ['WellheadJunction', [0, 0.98, 0.08], 0.13, 'oil'],
+    ['SurfaceReceiverJunction', [3.42, 0.68, 0.08], 0.16, 'oil'],
+  ].forEach(([name, position, radius, flowType]) => {
     const node = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 24, 12),
-      materials.junction.clone(),
+      flowType === 'steam'
+        ? materials.steamJunction.clone()
+        : materials.oilJunction.clone(),
     );
     node.name = name;
+    node.userData.flowType = flowType;
     node.position.fromArray(position);
     junctions.add(node);
   });
 
   return junctions;
-}
-
-function createProcessTracers(materials) {
-  const tracers = new THREE.Group();
-  tracers.name = 'ProcessTracers';
-
-  for (let index = 0; index < 6; index += 1) {
-    const tracer = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 24, 12),
-      materials.tracer.clone(),
-    );
-    tracer.name = `ProcessTracer${index + 1}`;
-    tracer.renderOrder = 6;
-    tracer.userData.seed = index / 6;
-    tracers.add(tracer);
-  }
-
-  return tracers;
 }
 
 function createSurfaceUnit(materials) {
@@ -672,23 +635,16 @@ function createCylinderBetween(start, end, radius, material, name) {
 function createParticleFlow(name, count, material, type, route = null) {
   const positions = new Float32Array(count * 3);
   const seeds = new Float32Array(count);
-  const colors = type === 'process' ? new Float32Array(count * 3) : null;
 
   for (let index = 0; index < count; index += 1) {
     seeds[index] = seeded(index + (type === 'steam' ? 40 : 120));
     positions[index * 3] = 0;
     positions[index * 3 + 1] = 0;
     positions[index * 3 + 2] = 0;
-    if (colors) {
-      colors[index * 3] = 1;
-      colors[index * 3 + 1] = 0.78;
-      colors[index * 3 + 2] = 0.34;
-    }
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.userData = { seeds, type };
   if (route) {
     const curve = new THREE.CatmullRomCurve3(route, false, 'centripetal', 0.45);
