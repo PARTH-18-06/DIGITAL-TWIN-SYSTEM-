@@ -53,23 +53,44 @@ export interface DigitalTwinProps {
   mode: TwinMode
 }
 
-type VisualState = {
-  wellName: string
+type TwinVisualState = {
   mode: TwinMode
-  flowSpeed: number
+  wellName: string
+  signedFlowSpeed: number
+  flowMagnitude: number
   flowDirection: FlowDirection
-  temperatureColorValue: number
+  flowAnimationValue: number
+  temperatureValue: number
   pressureIntensity: number
   pumpStrokeSpeed: number
-  rodBehavior: RodMovementBehavior
+  rodStrokeAmplitude: number
+  rodMovementBehavior: RodMovementBehavior
+  steamIntensity: number
   warnings: string[]
-  maxRiskScore: number
-  maxRiskCategory: RiskCategory
+  riskLevel: number
+  riskCategory: RiskCategory
   production: number | null
-  energy: number | null
-  sor: number | null
+  energyPerBarrel: number | null
+  steamOilRatio: number | null
   steamVolume: number | null
   injectionPressure: number | null
+}
+
+type VisualStates = {
+  currentVisualState: TwinVisualState
+  optimizedVisualState: TwinVisualState
+  activeVisualState: TwinVisualState
+}
+
+type ModelHandles = {
+  root: THREE.Object3D | null
+  reservoir: THREE.Object3D | null
+  pressureShell: THREE.Object3D | null
+  rod: THREE.Object3D | null
+  pump: THREE.Object3D | null
+  steamFlow: THREE.Object3D | null
+  oilFlow: THREE.Object3D | null
+  riskHalo: THREE.Object3D | null
 }
 
 type TwinScene = {
@@ -77,37 +98,35 @@ type TwinScene = {
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
   controls: OrbitControls
-  reservoir: THREE.Mesh
-  pressureShell: THREE.Mesh
-  rod: THREE.Group
-  pump: THREE.Group
-  steamParticles: THREE.Points
-  oilParticles: THREE.Points
-  riskHalo: THREE.Mesh
-  glbRoot: THREE.Object3D | null
+  handles: ModelHandles
+  fallbackRoot: THREE.Object3D | null
   resize: () => void
   resizeObserver: ResizeObserver | null
   animationFrame: number | null
   disposed: boolean
-  canvasCount: number
 }
 
 const MODEL_URL = '/models/well.glb'
-const DEFAULT_VISUAL_STATE: VisualState = {
-  wellName: 'No well selected',
+
+const DEFAULT_STATE: TwinVisualState = {
   mode: 'current',
-  flowSpeed: 0.25,
+  wellName: 'No well selected',
+  signedFlowSpeed: 0,
+  flowMagnitude: 0,
   flowDirection: 'stalled',
-  temperatureColorValue: 0.35,
+  flowAnimationValue: 0,
+  temperatureValue: 0.35,
   pressureIntensity: 0.35,
   pumpStrokeSpeed: 0.4,
-  rodBehavior: 'normal',
+  rodStrokeAmplitude: 0.22,
+  rodMovementBehavior: 'normal',
+  steamIntensity: 0.35,
   warnings: ['Select a real BGH well and run simulation to animate live operating state.'],
-  maxRiskScore: 0,
-  maxRiskCategory: 'LOW',
+  riskLevel: 0,
+  riskCategory: 'LOW',
   production: null,
-  energy: null,
-  sor: null,
+  energyPerBarrel: null,
+  steamOilRatio: null,
   steamVolume: null,
   injectionPressure: null,
 }
@@ -115,21 +134,22 @@ const DEFAULT_VISUAL_STATE: VisualState = {
 export function DigitalTwin(props: DigitalTwinProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<TwinScene | null>(null)
-  const visualRef = useRef<VisualState>(DEFAULT_VISUAL_STATE)
+  const visualRef = useRef<TwinVisualState>(DEFAULT_STATE)
   const [isRunning, setIsRunning] = useState(true)
   const runningRef = useRef(true)
   const [speed, setSpeed] = useState(1)
   const speedRef = useRef(1)
   const [modelStatus, setModelStatus] = useState<'loading' | 'loaded' | 'fallback'>('loading')
   const [webglError, setWebglError] = useState('')
-  const [renderStats, setRenderStats] = useState({ fps: 0, glbLoadMs: 0, canvasCount: 0 })
+  const [renderStats, setRenderStats] = useState({ fps: 0, glbLoadMs: 0, canvasCount: 0, loopTicks: 0 })
 
-  const visualState = useMemo(() => deriveVisualState(props), [props])
+  const visualStates = useMemo(() => deriveVisualStates(props), [props])
+  const { activeVisualState, currentVisualState, optimizedVisualState } = visualStates
 
   useEffect(() => {
-    visualRef.current = visualState
-    applyVisualState(sceneRef.current, visualState)
-  }, [visualState])
+    visualRef.current = activeVisualState
+    applyVisualState(sceneRef.current, activeVisualState)
+  }, [activeVisualState])
 
   useEffect(() => {
     runningRef.current = isRunning
@@ -153,27 +173,31 @@ export function DigitalTwin(props: DigitalTwinProps) {
     }
 
     sceneRef.current = twin
-    setRenderStats(stats => ({ ...stats, canvasCount: twin.canvasCount }))
+    setRenderStats(stats => ({ ...stats, canvasCount: container.querySelectorAll('canvas').length }))
     applyVisualState(twin, visualRef.current)
 
+    const modelUrl = new URLSearchParams(window.location.search).get('model') === 'missing' ? '/models/missing-well.glb' : MODEL_URL
     const startedAt = performance.now()
     new GLTFLoader().load(
-      MODEL_URL,
+      modelUrl,
       gltf => {
         if (twin.disposed) return
         const root = gltf.scene
         root.name = 'AbhishekWellGLB'
         fitObjectToScene(root, 5.2)
         root.position.set(0, 0, 0)
-        root.traverse(child => {
-          if ('isMesh' in child) {
-            const mesh = child as THREE.Mesh
-            mesh.castShadow = true
-            mesh.receiveShadow = true
-          }
-        })
+        prepareObjectForAnimation(root)
         twin.scene.add(root)
-        twin.glbRoot = root
+
+        if (twin.fallbackRoot) {
+          twin.scene.remove(twin.fallbackRoot)
+          disposeObject(twin.fallbackRoot)
+          twin.fallbackRoot = null
+        }
+
+        twin.handles = createGlbHandles(root)
+        ensureMissingOverlays(twin)
+        applyVisualState(twin, visualRef.current)
         setModelStatus('loaded')
         setRenderStats(stats => ({ ...stats, glbLoadMs: Math.round(performance.now() - startedAt) }))
       },
@@ -185,6 +209,7 @@ export function DigitalTwin(props: DigitalTwinProps) {
     )
 
     let frameCount = 0
+    let loopTicks = 0
     let lastStatsAt = performance.now()
     let previousFrameAt = performance.now()
     const animationStartedAt = previousFrameAt
@@ -194,6 +219,8 @@ export function DigitalTwin(props: DigitalTwinProps) {
       const frameAt = performance.now()
       const delta = Math.min((frameAt - previousFrameAt) / 1000, 0.05)
       previousFrameAt = frameAt
+      loopTicks += 1
+
       if (runningRef.current) {
         animateTwin(twin, visualRef.current, delta, (frameAt - animationStartedAt) / 1000, speedRef.current)
       }
@@ -207,6 +234,7 @@ export function DigitalTwin(props: DigitalTwinProps) {
           ...stats,
           fps: Math.round((frameCount * 1000) / (now - lastStatsAt)),
           canvasCount: container.querySelectorAll('canvas').length,
+          loopTicks,
         }))
         frameCount = 0
         lastStatsAt = now
@@ -226,17 +254,19 @@ export function DigitalTwin(props: DigitalTwinProps) {
   const statusText = webglError
     ? 'WebGL unavailable - showing dashboard fallback'
     : modelStatus === 'loaded'
-      ? `well.glb loaded${renderStats.glbLoadMs ? ` in ${renderStats.glbLoadMs} ms` : ''}`
-      : 'Using procedural fallback while model asset is unavailable'
+      ? `well.glb loaded as primary model${renderStats.glbLoadMs ? ` in ${renderStats.glbLoadMs} ms` : ''}`
+      : modelStatus === 'fallback'
+        ? '3D model fallback active'
+        : 'Loading well.glb; fallback standby'
 
   return (
     <section className="dt-embed" aria-label="Three.js digital twin visualization">
       <div className="dt-embed-head">
         <div>
           <span className="eyebrow">Three.js digital twin</span>
-          <h2>{visualState.wellName}</h2>
+          <h2>{activeVisualState.wellName}</h2>
         </div>
-        <span className={`dt-embed-mode ${visualState.mode}`}>{visualState.mode === 'optimized' ? 'AI recommended' : 'Current'}</span>
+        <span className={`dt-embed-mode ${activeVisualState.mode}`}>{activeVisualState.mode === 'optimized' ? 'AI recommended' : 'Current'}</span>
       </div>
 
       <div className="dt-embed-canvas-wrap">
@@ -250,44 +280,53 @@ export function DigitalTwin(props: DigitalTwinProps) {
         )}
 
         <div className="dt-embed-overlay">
-          <span className={`dt-flow-badge ${visualState.flowDirection}`}>{visualState.flowDirection} flow</span>
-          <span>Speed {formatMetric(visualState.flowSpeed)}</span>
-          <span>Temp {Math.round(visualState.temperatureColorValue * 100)}%</span>
-          <span>Pressure {Math.round(visualState.pressureIntensity * 100)}%</span>
+          <span className={`dt-flow-badge ${activeVisualState.flowDirection}`}>{activeVisualState.flowDirection} flow</span>
+          <span>Signed speed {formatMetric(activeVisualState.signedFlowSpeed)}</span>
+          <span>Magnitude {formatMetric(activeVisualState.flowMagnitude)}</span>
+          <span>Temp {Math.round(activeVisualState.temperatureValue * 100)}%</span>
+          <span>Pressure {Math.round(activeVisualState.pressureIntensity * 100)}%</span>
         </div>
       </div>
 
       <div className="dt-embed-controls">
         <div className="dt-embed-action-row">
           <button type="button" onClick={() => setIsRunning(value => !value)}>{isRunning ? 'Pause' : 'Start'}</button>
-          <button type="button" onClick={() => { setSpeed(1); applyVisualState(sceneRef.current, visualState) }}>Reset</button>
+          <button type="button" onClick={() => { setSpeed(1); applyVisualState(sceneRef.current, activeVisualState) }}>Reset</button>
           <label className="dt-speed">
             Speed
             <input min="0.25" max="2.5" step="0.25" type="range" value={speed} onChange={event => setSpeed(Number(event.target.value))} />
             <span>{speed.toFixed(2)}x</span>
           </label>
         </div>
-        <small className="dt-running-state">{statusText} | {renderStats.fps || '--'} fps | canvases: {renderStats.canvasCount || '--'}</small>
+        <small className="dt-running-state">{statusText} | {renderStats.fps || '--'} fps | canvases: {renderStats.canvasCount || '--'} | loop ticks: {renderStats.loopTicks}</small>
+        {activeVisualState.mode === 'optimized' && <small className="dt-mode-note">Recommended mode visualizes model-predicted operating conditions; prototype using synthetic data.</small>}
       </div>
 
       <div className="dt-embed-metrics">
-        <Metric label="Production" value={visualState.production} suffix=" bbl/d" />
-        <Metric label="Energy" value={visualState.energy} suffix=" /bbl" />
-        <Metric label="SOR" value={visualState.sor} />
-        <Metric label="Steam" value={visualState.steamVolume} suffix=" m³" />
+        <Metric label="Production" value={activeVisualState.production} suffix=" bbl/d" />
+        <Metric label="Energy" value={activeVisualState.energyPerBarrel} suffix=" /bbl" />
+        <Metric label="SOR" value={activeVisualState.steamOilRatio} />
+        <Metric label="Steam" value={activeVisualState.steamVolume} suffix=" m³" />
       </div>
 
       <div className="dt-risk-strip">
-        <span className={`dt-risk-pill ${visualState.maxRiskCategory.toLowerCase()}`}>
-          Max risk {visualState.maxRiskCategory} {Math.round(visualState.maxRiskScore * 100)}%
+        <span className={`dt-risk-pill ${activeVisualState.riskCategory.toLowerCase()}`}>
+          Max risk {activeVisualState.riskCategory} {Math.round(activeVisualState.riskLevel * 100)}%
         </span>
-        <span>Rod behavior: {visualState.rodBehavior.replace('_', ' ')}</span>
-        {visualState.injectionPressure !== null && <span>Injection {formatMetric(visualState.injectionPressure)}</span>}
+        <span>Rod behavior: {activeVisualState.rodMovementBehavior.replace('_', ' ')}</span>
+        <span>Pump {formatMetric(activeVisualState.pumpStrokeSpeed)} spm</span>
+        <span>Rod amplitude {formatMetric(activeVisualState.rodStrokeAmplitude)}</span>
+        {activeVisualState.injectionPressure !== null && <span>Injection {formatMetric(activeVisualState.injectionPressure)}</span>}
       </div>
 
-      {visualState.warnings.length > 0 && (
+      <div className="dt-state-debug" aria-label="Digital twin visual-state comparison">
+        <span>Current flow {formatMetric(currentVisualState.signedFlowSpeed)} / pump {formatMetric(currentVisualState.pumpStrokeSpeed)}</span>
+        <span>Recommended flow {formatMetric(optimizedVisualState.signedFlowSpeed)} / pump {formatMetric(optimizedVisualState.pumpStrokeSpeed)}</span>
+      </div>
+
+      {activeVisualState.warnings.length > 0 && (
         <div className="dt-embed-warnings">
-          {visualState.warnings.map(warning => <span key={warning}>{warning}</span>)}
+          {activeVisualState.warnings.map(warning => <span key={warning}>{warning}</span>)}
         </div>
       )}
     </section>
@@ -298,37 +337,85 @@ function Metric({ label, suffix = '', value }: { label: string; suffix?: string;
   return <div className="dt-embed-metric"><span>{label}</span><strong>{value === null ? '-' : `${formatMetric(value)}${suffix}`}</strong></div>
 }
 
-function deriveVisualState({ mode, optimization, risk, simulation, well }: DigitalTwinProps): VisualState {
-  const predictionSource = mode === 'optimized' ? optimization?.predictions.recommended : optimization?.predictions.current
-  const recommended = mode === 'optimized' ? optimization?.recommendedParameters : null
-  const riskEntries = risk ? Object.values(risk) : []
-  const riskiest = riskEntries.reduce(
-    (acc, item) => (item.risk_score > acc.risk_score ? item : acc),
-    { risk_score: 0, category: 'LOW' as RiskCategory },
-  )
+function deriveVisualStates(props: DigitalTwinProps): VisualStates {
+  const currentVisualState = deriveCurrentVisualState(props)
+  const optimizedVisualState = deriveOptimizedVisualState(props, currentVisualState)
+  return {
+    currentVisualState,
+    optimizedVisualState,
+    activeVisualState: props.mode === 'optimized' ? optimizedVisualState : currentVisualState,
+  }
+}
+
+function deriveCurrentVisualState({ risk, simulation, well }: DigitalTwinProps): TwinVisualState {
+  const signedFlowSpeed = simulation?.flow_speed ?? DEFAULT_STATE.signedFlowSpeed
+  const flowMagnitude = Math.abs(signedFlowSpeed)
+  const riskSummary = summarizeLiveRisk(risk)
+  const temperatureValue = simulation?.temperature_color_value ?? normalizeRange(well?.reservoir_temperature, 40, 155, DEFAULT_STATE.temperatureValue)
+  const pressureIntensity = simulation?.pressure_intensity ?? normalizeRange(well?.reservoir_pressure, 2, 6, DEFAULT_STATE.pressureIntensity)
 
   return {
-    wellName: well?.well_name ?? DEFAULT_VISUAL_STATE.wellName,
-    mode,
-    flowSpeed: Math.max(0, simulation?.flow_speed ?? DEFAULT_VISUAL_STATE.flowSpeed),
-    flowDirection: simulation?.flow_direction ?? DEFAULT_VISUAL_STATE.flowDirection,
-    temperatureColorValue: clamp01(simulation?.temperature_color_value ?? normalizeRange(well?.reservoir_temperature, 40, 155, DEFAULT_VISUAL_STATE.temperatureColorValue)),
-    pressureIntensity: clamp01(simulation?.pressure_intensity ?? normalizeRange(well?.reservoir_pressure, 2, 6, DEFAULT_VISUAL_STATE.pressureIntensity)),
-    pumpStrokeSpeed: Math.max(0.1, simulation?.pump_stroke_speed ?? recommended?.rpm_or_spm ?? DEFAULT_VISUAL_STATE.pumpStrokeSpeed),
-    rodBehavior: simulation?.rod_movement_behavior ?? (riskiest.category === 'HIGH' ? 'impact_risk' : DEFAULT_VISUAL_STATE.rodBehavior),
-    warnings: simulation?.warnings?.length ? simulation.warnings : DEFAULT_VISUAL_STATE.warnings,
-    maxRiskScore: clamp01(riskiest.risk_score),
-    maxRiskCategory: riskiest.category,
-    production: readNumber(predictionSource, 'oil_production', 'predicted_oil_flow_rate', 'oil_flow_rate'),
-    energy: readNumber(predictionSource, 'energy_per_barrel'),
-    sor: readNumber(predictionSource, 'steam_oil_ratio', 'sor'),
-    steamVolume: recommended?.steam_volume ?? null,
-    injectionPressure: recommended?.steam_injection_pressure ?? null,
+    ...DEFAULT_STATE,
+    mode: 'current',
+    wellName: well?.well_name ?? DEFAULT_STATE.wellName,
+    signedFlowSpeed,
+    flowMagnitude,
+    flowDirection: simulation?.flow_direction ?? DEFAULT_STATE.flowDirection,
+    flowAnimationValue: normalizeStageOneFlow(flowMagnitude),
+    temperatureValue: clamp01(temperatureValue),
+    pressureIntensity: clamp01(pressureIntensity),
+    pumpStrokeSpeed: simulation?.pump_stroke_speed ?? DEFAULT_STATE.pumpStrokeSpeed,
+    rodStrokeAmplitude: simulation ? rodAmplitudeFromBehavior(simulation.rod_movement_behavior, null) : DEFAULT_STATE.rodStrokeAmplitude,
+    rodMovementBehavior: simulation?.rod_movement_behavior ?? (riskSummary.category === 'HIGH' ? 'impact_risk' : DEFAULT_STATE.rodMovementBehavior),
+    warnings: simulation ? simulation.warnings : DEFAULT_STATE.warnings,
+    riskLevel: riskSummary.score,
+    riskCategory: riskSummary.category,
+  }
+}
+
+function deriveOptimizedVisualState({ optimization, well }: DigitalTwinProps, current: TwinVisualState): TwinVisualState {
+  const recommended = optimization?.recommendedParameters
+  const predictions = optimization?.predictions.recommended
+  const production = readNumber(predictions, 'oil_production', 'predicted_oil_flow_rate', 'oil_flow_rate') ?? current.production
+  const signedFlowSpeed = production !== null ? productionToDemoFlowSpeed(production) : current.signedFlowSpeed
+  const riskSummary = summarizePredictionRisk(predictions, current.riskLevel, current.riskCategory)
+  const injectionPressure = recommended?.steam_injection_pressure ?? current.injectionPressure
+  const steamVolume = recommended?.steam_volume ?? current.steamVolume
+  const pumpStrokeSpeed = recommended?.rpm_or_spm ?? current.pumpStrokeSpeed
+  const strokeLength = recommended?.stroke_length ?? null
+  const pressureIntensity = injectionPressure !== null ? normalizeInjectionPressure(injectionPressure) : current.pressureIntensity
+  const steamIntensity = steamVolume !== null ? normalizeSteamVolume(steamVolume) : current.steamIntensity
+  const flowDirection: FlowDirection = signedFlowSpeed > 0.0001 ? 'forward' : signedFlowSpeed < -0.0001 ? 'reverse' : 'stalled'
+  const warnings = [
+    'Recommended mode visualizes model-predicted operating conditions; prototype using synthetic data.',
+    ...riskWarnings(riskSummary.score, riskSummary.category),
+  ]
+
+  return {
+    ...current,
+    mode: 'optimized',
+    wellName: well?.well_name ?? current.wellName,
+    signedFlowSpeed,
+    flowMagnitude: Math.abs(signedFlowSpeed),
+    flowDirection,
+    flowAnimationValue: normalizeStageOneFlow(Math.abs(signedFlowSpeed)),
+    temperatureValue: current.temperatureValue,
+    pressureIntensity,
+    pumpStrokeSpeed,
+    rodStrokeAmplitude: rodAmplitudeFromBehavior(current.rodMovementBehavior, strokeLength),
+    steamIntensity,
+    warnings,
+    riskLevel: riskSummary.score,
+    riskCategory: riskSummary.category,
+    production,
+    energyPerBarrel: readNumber(predictions, 'energy_per_barrel') ?? current.energyPerBarrel,
+    steamOilRatio: readNumber(predictions, 'steam_oil_ratio', 'sor') ?? current.steamOilRatio,
+    steamVolume,
+    injectionPressure,
   }
 }
 
 function createTwinScene(container: HTMLDivElement): TwinScene {
-  const canvasCountBefore = container.querySelectorAll('canvas').length
   const scene = new THREE.Scene()
   scene.name = 'BaghewalaDigitalTwinScene'
   scene.background = new THREE.Color('#10191b')
@@ -362,8 +449,8 @@ function createTwinScene(container: HTMLDivElement): TwinScene {
   const grid = new THREE.GridHelper(9, 18, '#6f7b72', '#314146')
   scene.add(grid)
 
-  const model = createProceduralWellModel()
-  scene.add(model.root)
+  const fallback = createProceduralFallbackModel()
+  scene.add(fallback.root)
 
   let twin: TwinScene
   const resize = () => {
@@ -380,19 +467,12 @@ function createTwinScene(container: HTMLDivElement): TwinScene {
     camera,
     renderer,
     controls,
-    reservoir: model.reservoir,
-    pressureShell: model.pressureShell,
-    rod: model.rod,
-    pump: model.pump,
-    steamParticles: model.steamParticles,
-    oilParticles: model.oilParticles,
-    riskHalo: model.riskHalo,
-    glbRoot: null,
+    handles: fallback.handles,
+    fallbackRoot: fallback.root,
     resize,
     resizeObserver: null,
     animationFrame: null,
     disposed: false,
-    canvasCount: canvasCountBefore + 1,
   }
 
   twin.resizeObserver = new ResizeObserver(resize)
@@ -403,141 +483,219 @@ function createTwinScene(container: HTMLDivElement): TwinScene {
   return twin
 }
 
-function createProceduralWellModel() {
+function createProceduralFallbackModel(): { root: THREE.Group; handles: ModelHandles } {
   const root = new THREE.Group()
-  root.name = 'ProceduralBaghewalaWellFallback'
+  root.name = 'ProceduralLoadingFallback'
 
-  const reservoirMaterial = new THREE.MeshStandardMaterial({ color: '#92542c', roughness: 0.65, metalness: 0.05, transparent: true, opacity: 0.74 })
-  const reservoir = new THREE.Mesh(new THREE.CylinderGeometry(2.75, 3.15, 0.72, 64), reservoirMaterial)
+  const reservoir = new THREE.Mesh(new THREE.CylinderGeometry(2.75, 3.15, 0.72, 64), new THREE.MeshStandardMaterial({ color: '#92542c', roughness: 0.65, metalness: 0.05, transparent: true, opacity: 0.74 }))
+  reservoir.name = 'FallbackReservoir'
   reservoir.position.y = -3.1
-  reservoir.receiveShadow = true
   root.add(reservoir)
 
-  const pressureShell = new THREE.Mesh(
-    new THREE.SphereGeometry(2.05, 40, 22),
-    new THREE.MeshStandardMaterial({ color: '#2aa7a7', emissive: '#134947', transparent: true, opacity: 0.24, wireframe: true }),
-  )
+  const pressureShell = new THREE.Mesh(new THREE.SphereGeometry(2.05, 40, 22), new THREE.MeshStandardMaterial({ color: '#2aa7a7', emissive: '#134947', transparent: true, opacity: 0.24, wireframe: true }))
+  pressureShell.name = 'FallbackPressureShell'
   pressureShell.scale.y = 0.35
   pressureShell.position.y = -2.85
   root.add(pressureShell)
 
-  const casing = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.16, 0.16, 6.3, 32),
-    new THREE.MeshStandardMaterial({ color: '#c8d0ca', metalness: 0.7, roughness: 0.25 }),
-  )
-  casing.position.y = -0.35
-  casing.castShadow = true
-  root.add(casing)
-
-  const tubing = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.08, 6.7, 24),
-    new THREE.MeshStandardMaterial({ color: '#eef3e8', metalness: 0.55, roughness: 0.22 }),
-  )
-  tubing.position.y = -0.35
-  root.add(tubing)
+  const well = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 6.3, 32), new THREE.MeshStandardMaterial({ color: '#c8d0ca', metalness: 0.7, roughness: 0.25 }))
+  well.name = 'FallbackWell'
+  well.position.y = -0.35
+  root.add(well)
 
   const rod = new THREE.Group()
-  const rodMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.035, 0.035, 5.45, 18),
-    new THREE.MeshStandardMaterial({ color: '#f1d47c', emissive: '#2c2007', metalness: 0.4, roughness: 0.35 }),
-  )
-  rodMesh.position.y = -0.2
-  rod.add(rodMesh)
+  rod.name = 'FallbackSuckerRod'
+  rod.add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 5.45, 18), new THREE.MeshStandardMaterial({ color: '#f1d47c', emissive: '#2c2007', metalness: 0.4, roughness: 0.35 })))
   root.add(rod)
 
   const pump = new THREE.Group()
-  const pumpBody = new THREE.Mesh(
-    new THREE.BoxGeometry(1.85, 0.22, 0.18),
-    new THREE.MeshStandardMaterial({ color: '#d66d3f', emissive: '#391508', metalness: 0.15, roughness: 0.5 }),
-  )
-  const counterWeight = new THREE.Mesh(
-    new THREE.SphereGeometry(0.25, 24, 16),
-    new THREE.MeshStandardMaterial({ color: '#f0bd76', metalness: 0.2, roughness: 0.45 }),
-  )
+  pump.name = 'FallbackSRPPump'
+  const pumpBody = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.22, 0.18), new THREE.MeshStandardMaterial({ color: '#d66d3f', emissive: '#391508', metalness: 0.15, roughness: 0.5 }))
   pumpBody.position.set(0, 2.35, 0)
-  counterWeight.position.set(1.05, 2.15, 0)
-  pump.add(pumpBody, counterWeight)
+  pump.add(pumpBody)
   root.add(pump)
 
-  const steamParticles = createFlowParticles('#d9f4ff', -1.25)
-  const oilParticles = createFlowParticles('#111111', 1.25)
-  root.add(steamParticles, oilParticles)
+  const steamFlow = createParticleFlow('FallbackSteamFlow', '#d9f4ff', -1.25, 72)
+  const oilFlow = createParticleFlow('FallbackOilFlow', '#111111', 1.25, 72)
+  const riskHalo = createRiskHalo()
+  root.add(steamFlow, oilFlow, riskHalo)
+  prepareObjectForAnimation(root)
 
-  const riskHalo = new THREE.Mesh(
-    new THREE.TorusGeometry(1.15, 0.04, 12, 64),
-    new THREE.MeshBasicMaterial({ color: '#c7df78', transparent: true, opacity: 0.35 }),
-  )
+  return { root, handles: { root, reservoir, pressureShell, rod, pump, steamFlow, oilFlow, riskHalo } }
+}
+
+function createGlbHandles(root: THREE.Object3D): ModelHandles {
+  const reservoir = findObject(root, ['Reservoir'])
+  return {
+    root,
+    reservoir,
+    pressureShell: findObject(root, ['HeatedReservoirRegion', 'Reservoir']) ?? reservoir,
+    rod: findObject(root, ['SuckerRod']),
+    pump: findObject(root, ['SRPPump', 'WalkingBeam', 'HorseHead', 'SurfaceUnit']),
+    steamFlow: findObject(root, ['SteamFlow', 'SteamParticle']),
+    oilFlow: findObject(root, ['OilFlow', 'OilParticle', 'WellboreLiquid']),
+    riskHalo: null,
+  }
+}
+
+function ensureMissingOverlays(twin: TwinScene) {
+  if (!twin.handles.steamFlow) {
+    const steamFlow = createParticleFlow('SteamFlowOverlay', '#d9f4ff', -1.25, 72)
+    twin.scene.add(steamFlow)
+    twin.handles.steamFlow = steamFlow
+  }
+  if (!twin.handles.oilFlow) {
+    const oilFlow = createParticleFlow('OilFlowOverlay', '#111111', 1.25, 72)
+    twin.scene.add(oilFlow)
+    twin.handles.oilFlow = oilFlow
+  }
+  if (!twin.handles.riskHalo) {
+    const riskHalo = createRiskHalo()
+    twin.scene.add(riskHalo)
+    twin.handles.riskHalo = riskHalo
+  }
+  prepareObjectForAnimation(twin.scene)
+}
+
+function createParticleFlow(name: string, color: string, x: number, count: number) {
+  const group = new THREE.Group()
+  group.name = name
+  for (let index = 0; index < count; index += 1) {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.72 }))
+    const y = -3 + (index / Math.max(1, count - 1)) * 5.7
+    const angle = index * 1.618
+    mesh.position.set(x + Math.cos(angle) * 0.08, y, Math.sin(angle) * 0.08)
+    group.add(mesh)
+  }
+  return group
+}
+
+function createRiskHalo() {
+  const riskHalo = new THREE.Mesh(new THREE.TorusGeometry(1.15, 0.04, 12, 64), new THREE.MeshBasicMaterial({ color: '#c7df78', transparent: true, opacity: 0.35 }))
+  riskHalo.name = 'RiskHaloOverlay'
   riskHalo.position.set(0, -0.8, 0)
   riskHalo.rotation.x = Math.PI / 2
-  root.add(riskHalo)
-
-  return { root, reservoir, pressureShell, rod, pump, steamParticles, oilParticles, riskHalo }
+  return riskHalo
 }
 
-function createFlowParticles(color: string, x: number) {
-  const geometry = new THREE.BufferGeometry()
-  const points = Array.from({ length: 72 }, (_, index) => {
-    const y = -3 + (index / 71) * 5.7
-    const angle = index * 1.618
-    return [x + Math.cos(angle) * 0.08, y, Math.sin(angle) * 0.08]
-  }).flat()
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3))
-  const material = new THREE.PointsMaterial({ color, size: 0.055, transparent: true, opacity: 0.7, depthWrite: false })
-  return new THREE.Points(geometry, material)
+function animateTwin(twin: TwinScene, state: TwinVisualState, delta: number, elapsed: number, speed: number) {
+  const direction = state.flowDirection === 'reverse' ? -1 : state.flowDirection === 'forward' ? 1 : 0
+  const flowOffset = delta * speed * direction * state.flowAnimationValue * 3.2
+  if (direction !== 0) {
+    animateFlow(twin.handles.steamFlow, flowOffset, state.steamIntensity)
+    animateFlow(twin.handles.oilFlow, flowOffset, state.steamIntensity)
+  }
+
+  const pumpRate = Math.max(0.05, state.pumpStrokeSpeed / 4)
+  const pumpPhase = Math.sin(elapsed * pumpRate * speed)
+  setObjectYOffset(twin.handles.rod, pumpPhase * state.rodStrokeAmplitude)
+  rotateObjectZ(twin.handles.pump, pumpPhase * 0.18)
+  setObjectScale(twin.handles.pressureShell, 1 + state.pressureIntensity * 0.16)
+  setObjectScale(twin.handles.reservoir, 1 + state.temperatureValue * 0.035)
+  if (twin.handles.riskHalo) twin.handles.riskHalo.rotation.z += delta * speed * (0.25 + state.riskLevel)
 }
 
-function animateTwin(twin: TwinScene, state: VisualState, delta: number, elapsed: number, speed: number) {
-  const animationScale = speed * (0.35 + state.flowSpeed * 0.08)
-  const direction = state.flowDirection === 'reverse' ? -1 : state.flowDirection === 'stalled' ? 0 : 1
-
-  animateFlow(twin.steamParticles, delta * animationScale * Math.max(direction, 0.2))
-  animateFlow(twin.oilParticles, delta * animationScale * direction)
-
-  const pumpRate = Math.max(0.4, state.pumpStrokeSpeed / 4)
-  const behaviorAmplitude = state.rodBehavior === 'normal' ? 0.22 : state.rodBehavior === 'floating_risk' ? 0.36 : 0.48
-  twin.rod.position.y = Math.sin(elapsed * pumpRate * speed) * behaviorAmplitude
-  twin.pump.rotation.z = Math.sin(elapsed * pumpRate * speed) * 0.16
-
-  twin.reservoir.scale.setScalar(1 + state.temperatureColorValue * 0.05)
-  twin.pressureShell.scale.set(1 + state.pressureIntensity * 0.28, 0.34 + state.pressureIntensity * 0.16, 1 + state.pressureIntensity * 0.28)
-  twin.riskHalo.rotation.z += delta * speed * (0.6 + state.maxRiskScore)
-}
-
-function animateFlow(points: THREE.Points, offset: number) {
-  const positions = points.geometry.getAttribute('position') as THREE.BufferAttribute
-  for (let index = 1; index < positions.count * 3; index += 3) {
-    let y = positions.array[index] as number
-    y += offset
+function animateFlow(flow: THREE.Object3D | null, offset: number, intensity: number) {
+  if (!flow) return
+  flow.traverse(object => {
+    if (!isMesh(object)) return
+    ensureBaseTransform(object)
+    let y = object.position.y + offset
     if (y > 2.9) y = -3.0
     if (y < -3.0) y = 2.9
-    positions.array[index] = y
-  }
-  positions.needsUpdate = true
+    object.position.y = y
+    setMaterialOpacity(object, 0.2 + clamp01(intensity) * 0.7)
+  })
 }
 
-function applyVisualState(twin: TwinScene | null, state: VisualState) {
+function applyVisualState(twin: TwinScene | null, state: TwinVisualState) {
   if (!twin) return
-  const tempColor = new THREE.Color('#3f78c8').lerp(new THREE.Color('#ff7a35'), state.temperatureColorValue)
+  const tempColor = new THREE.Color('#3f78c8').lerp(new THREE.Color('#ff7a35'), state.temperatureValue)
   const pressureColor = new THREE.Color('#1e6f72').lerp(new THREE.Color('#c7df78'), state.pressureIntensity)
-  const riskColor = state.maxRiskCategory === 'HIGH' ? '#f05c3f' : state.maxRiskCategory === 'MEDIUM' ? '#f4b740' : '#c7df78'
+  const riskColor = state.riskCategory === 'HIGH' ? '#f05c3f' : state.riskCategory === 'MEDIUM' ? '#f4b740' : '#c7df78'
 
-  const reservoirMaterial = twin.reservoir.material as THREE.MeshStandardMaterial
-  reservoirMaterial.color.copy(tempColor)
-  reservoirMaterial.emissive.copy(tempColor).multiplyScalar(0.14)
+  tintObject(twin.handles.reservoir, tempColor, 0.14)
+  tintObject(twin.handles.pressureShell, pressureColor, 0.45, 0.16 + state.pressureIntensity * 0.42)
+  tintObject(twin.handles.riskHalo, new THREE.Color(riskColor), 0, 0.25 + state.riskLevel * 0.5)
+  setObjectScale(twin.handles.pressureShell, 1 + state.pressureIntensity * 0.16)
+  setObjectScale(twin.handles.reservoir, 1 + state.temperatureValue * 0.035)
+}
 
-  const shellMaterial = twin.pressureShell.material as THREE.MeshStandardMaterial
-  shellMaterial.color.copy(pressureColor)
-  shellMaterial.emissive.copy(pressureColor).multiplyScalar(0.45)
-  shellMaterial.opacity = 0.18 + state.pressureIntensity * 0.32
+function findObject(root: THREE.Object3D, names: string[]) {
+  let match: THREE.Object3D | null = null
+  root.traverse(object => {
+    if (match) return
+    const objectName = object.name.toLowerCase()
+    if (names.some(name => objectName.includes(name.toLowerCase()))) match = object
+  })
+  return match
+}
 
-  const riskMaterial = twin.riskHalo.material as THREE.MeshBasicMaterial
-  riskMaterial.color.set(riskColor)
-  riskMaterial.opacity = 0.25 + state.maxRiskScore * 0.5
+function prepareObjectForAnimation(root: THREE.Object3D) {
+  root.traverse(object => {
+    ensureBaseTransform(object)
+    if (isMesh(object)) {
+      object.castShadow = true
+      object.receiveShadow = true
+      normalizeMeshMaterial(object)
+    }
+  })
+}
 
-  const steamMaterial = twin.steamParticles.material as THREE.PointsMaterial
-  const oilMaterial = twin.oilParticles.material as THREE.PointsMaterial
-  steamMaterial.opacity = state.flowDirection === 'stalled' ? 0.22 : 0.72
-  oilMaterial.opacity = state.flowDirection === 'stalled' ? 0.18 : state.flowDirection === 'reverse' ? 0.42 : 0.76
+function ensureBaseTransform(object: THREE.Object3D) {
+  object.userData.basePosition ??= object.position.clone()
+  object.userData.baseRotation ??= object.rotation.clone()
+  object.userData.baseScale ??= object.scale.clone()
+}
+
+function setObjectYOffset(object: THREE.Object3D | null, offset: number) {
+  if (!object) return
+  ensureBaseTransform(object)
+  const base = object.userData.basePosition as THREE.Vector3
+  object.position.y = base.y + offset
+}
+
+function rotateObjectZ(object: THREE.Object3D | null, amount: number) {
+  if (!object) return
+  ensureBaseTransform(object)
+  const base = object.userData.baseRotation as THREE.Euler
+  object.rotation.z = base.z + amount
+}
+
+function setObjectScale(object: THREE.Object3D | null, scale: number) {
+  if (!object) return
+  ensureBaseTransform(object)
+  const base = object.userData.baseScale as THREE.Vector3
+  object.scale.set(base.x * scale, base.y * scale, base.z * scale)
+}
+
+function tintObject(object: THREE.Object3D | null, color: THREE.Color, emissiveIntensity = 0, opacity?: number) {
+  object?.traverse(child => {
+    if (!isMesh(child)) return
+    const materials = Array.isArray(child.material) ? child.material : [child.material]
+    materials.forEach(material => {
+      const tintable = material as THREE.Material & { color?: THREE.Color; emissive?: THREE.Color }
+      tintable.color?.copy(color)
+      tintable.emissive?.copy(color).multiplyScalar(emissiveIntensity)
+      if (opacity !== undefined) {
+        material.transparent = true
+        material.opacity = opacity
+      }
+    })
+  })
+}
+
+function setMaterialOpacity(mesh: THREE.Mesh, opacity: number) {
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+  materials.forEach(material => {
+    material.transparent = true
+    material.opacity = opacity
+  })
+}
+
+function normalizeMeshMaterial(mesh: THREE.Mesh) {
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+  materials.forEach(material => { material.needsUpdate = true })
 }
 
 function fitObjectToScene(object: THREE.Object3D, targetSize: number) {
@@ -558,16 +716,18 @@ function disposeTwinScene(twin: TwinScene) {
   twin.resizeObserver?.disconnect()
   window.removeEventListener('resize', twin.resize)
   twin.controls.dispose()
-  twin.scene.traverse(object => {
-    if ('geometry' in object) {
-      ;(object as THREE.Mesh).geometry?.dispose()
-    }
-    if ('material' in object) {
-      disposeMaterial((object as THREE.Mesh).material)
-    }
-  })
+  disposeObject(twin.scene)
   twin.renderer.dispose()
   twin.renderer.domElement.remove()
+}
+
+function disposeObject(object: THREE.Object3D) {
+  object.traverse(child => {
+    if (isMesh(child)) {
+      child.geometry?.dispose()
+      disposeMaterial(child.material)
+    }
+  })
 }
 
 function disposeMaterial(material: THREE.Material | THREE.Material[] | undefined) {
@@ -581,6 +741,49 @@ function disposeMaterial(material: THREE.Material | THREE.Material[] | undefined
     })
     item.dispose()
   })
+}
+
+function isMesh(object: THREE.Object3D): object is THREE.Mesh {
+  return 'isMesh' in object
+}
+
+function summarizeLiveRisk(risk: DigitalTwinProps['risk']) {
+  if (!risk) return { score: 0, category: 'LOW' as RiskCategory }
+  return Object.values(risk).reduce(
+    (acc, item) => (item.risk_score > acc.score ? { score: clamp01(item.risk_score), category: item.category } : acc),
+    { score: 0, category: 'LOW' as RiskCategory },
+  )
+}
+
+function summarizePredictionRisk(predictions: Record<string, number> | undefined, fallbackScore: number, fallbackCategory: RiskCategory) {
+  const values = [
+    readNumber(predictions, 'rod_floating_risk'),
+    readNumber(predictions, 'impact_loading_risk'),
+    readNumber(predictions, 'pump_unsetting_risk'),
+    readNumber(predictions, 'rod_failure_risk'),
+  ].filter((value): value is number => value !== null)
+  const score = values.length ? clamp01(Math.max(...values)) : fallbackScore
+  return { score, category: riskCategory(score) ?? fallbackCategory }
+}
+
+function riskCategory(score: number): RiskCategory {
+  if (score >= 0.35) return 'HIGH'
+  if (score >= 0.2) return 'MEDIUM'
+  return 'LOW'
+}
+
+function riskWarnings(score: number, category: RiskCategory) {
+  if (category === 'HIGH') return [`Recommended case still has elevated synthetic risk (${Math.round(score * 100)}%).`]
+  if (category === 'MEDIUM') return [`Recommended case has medium synthetic risk (${Math.round(score * 100)}%).`]
+  return []
+}
+
+function rodAmplitudeFromBehavior(behavior: RodMovementBehavior, strokeLength: number | null) {
+  const fromStroke = strokeLength !== null ? 0.14 + normalizeStrokeLength(strokeLength) * 0.42 : null
+  if (fromStroke !== null) return fromStroke
+  if (behavior === 'floating_risk') return 0.36
+  if (behavior === 'impact_risk') return 0.48
+  return 0.22
 }
 
 function readNumber(source: Record<string, number> | undefined, ...keys: string[]) {
@@ -597,10 +800,38 @@ function normalizeRange(value: number | null | undefined, min: number, max: numb
   return (value - min) / (max - min)
 }
 
+function normalizeStageOneFlow(flowMagnitude: number) {
+  return clamp01(flowMagnitude / 0.08)
+}
+
+function productionToDemoFlowSpeed(production: number) {
+  return normalizeProduction(production) * 0.08
+}
+
+function normalizeProduction(production: number) {
+  // Demo-only Baghewala synthetic-data range for visual flow, not a calibrated hydraulic conversion.
+  return clamp01((production - 5) / (85 - 5))
+}
+
+function normalizeInjectionPressure(pressure: number) {
+  // Demo-only synthetic range based on the current validated API envelope.
+  return clamp01((pressure - 9.17) / (29.4 - 9.17))
+}
+
+function normalizeSteamVolume(steamVolume: number) {
+  // Demo-only synthetic range based on the current validated API envelope.
+  return clamp01((steamVolume - 454.86) / (1448.01 - 454.86))
+}
+
+function normalizeStrokeLength(strokeLength: number) {
+  // Demo-only synthetic range based on the current validated API envelope.
+  return clamp01((strokeLength - 38.5) / (71.5 - 38.5))
+}
+
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value))
 }
 
 function formatMetric(value: number) {
-  return Number(value).toFixed(Math.abs(value) >= 100 ? 0 : 2)
+  return Number(value).toFixed(Math.abs(value) >= 100 ? 0 : 3)
 }
