@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 type FlowDirection = 'forward' | 'reverse' | 'stalled'
@@ -25,6 +30,10 @@ export interface DigitalTwinProps {
     pump_stroke_speed: number
     rod_movement_behavior: RodMovementBehavior
     warnings: string[]
+  } | null
+
+  currentInput: {
+    steam_volume: number
   } | null
 
   optimization: {
@@ -101,9 +110,12 @@ type TwinScene = {
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
+  composer: EffectComposer
+  bloomComposer: EffectComposer
   controls: OrbitControls
   handles: ModelHandles
   fallbackRoot: THREE.Object3D | null
+  environmentMap: THREE.Texture | null
   resize: () => void
   resizeObserver: ResizeObserver | null
   animationFrame: number | null
@@ -111,6 +123,10 @@ type TwinScene = {
 }
 
 const MODEL_URL = '/models/well.glb'
+const BLOOM_LAYER = 1
+const SELECTIVE_BLOOM_LAYER = new THREE.Layers()
+SELECTIVE_BLOOM_LAYER.set(BLOOM_LAYER)
+const DARK_BLOOM_MATERIAL = new THREE.MeshBasicMaterial({ color: '#000000' })
 
 const DEFAULT_STATE: TwinVisualState = {
   mode: 'current',
@@ -191,10 +207,11 @@ export function DigitalTwin(props: DigitalTwinProps) {
           return
         }
         root.name = 'AbhishekWellGLB'
-        fitObjectToScene(root, 5.2)
+        fitObjectToScene(root, 5.6)
         root.position.set(0, 0, 0)
         prepareObjectForAnimation(root)
         twin.scene.add(root)
+        frameCameraToObject(twin, root)
 
         if (twin.fallbackRoot) {
           twin.scene.remove(twin.fallbackRoot)
@@ -232,7 +249,7 @@ export function DigitalTwin(props: DigitalTwinProps) {
         animateTwin(twin, visualRef.current, delta, (frameAt - animationStartedAt) / 1000, speedRef.current)
       }
       twin.controls.update()
-      twin.renderer.render(twin.scene, twin.camera)
+      renderTwinScene(twin)
       frameCount += 1
 
       const now = performance.now()
@@ -354,12 +371,16 @@ function deriveVisualStates(props: DigitalTwinProps): VisualStates {
   }
 }
 
-function deriveCurrentVisualState({ risk, simulation, well }: DigitalTwinProps): TwinVisualState {
+function deriveCurrentVisualState({ currentInput, optimization, risk, simulation, well }: DigitalTwinProps): TwinVisualState {
   const signedFlowSpeed = simulation?.flow_speed ?? DEFAULT_STATE.signedFlowSpeed
   const flowMagnitude = Math.abs(signedFlowSpeed)
   const riskSummary = summarizeLiveRisk(risk)
   const temperatureValue = simulation?.temperature_color_value ?? normalizeRange(well?.reservoir_temperature, 40, 155, DEFAULT_STATE.temperatureValue)
   const pressureIntensity = simulation?.pressure_intensity ?? normalizeRange(well?.reservoir_pressure, 2, 6, DEFAULT_STATE.pressureIntensity)
+  const currentPredictions = optimization?.predictions.current
+  const production = readNumber(currentPredictions, 'oil_production', 'predicted_oil_flow_rate', 'oil_flow_rate')
+  const energyPerBarrel = readNumber(currentPredictions, 'energy_per_barrel')
+  const steamOilRatio = readNumber(currentPredictions, 'steam_oil_ratio', 'sor')
 
   return {
     ...DEFAULT_STATE,
@@ -377,6 +398,10 @@ function deriveCurrentVisualState({ risk, simulation, well }: DigitalTwinProps):
     warnings: simulation ? simulation.warnings : DEFAULT_STATE.warnings,
     riskLevel: riskSummary.score,
     riskCategory: riskSummary.category,
+    production,
+    energyPerBarrel,
+    steamOilRatio,
+    steamVolume: currentInput?.steam_volume ?? null,
   }
 }
 
@@ -428,32 +453,63 @@ function createTwinScene(container: HTMLDivElement): TwinScene {
   scene.background = new THREE.Color('#10191b')
   scene.fog = new THREE.FogExp2('#10191b', 0.05)
 
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100)
-  camera.position.set(6.2, 3.4, 7.2)
+  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100)
+  camera.position.set(5.4, 3.25, 6.2)
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.18
   renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFShadowMap
   container.replaceChildren(renderer.domElement)
+
+  const pmremGenerator = new THREE.PMREMGenerator(renderer)
+  const environmentMap = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture
+  scene.environment = environmentMap
+  pmremGenerator.dispose()
 
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = 0.08
-  controls.minDistance = 5
-  controls.maxDistance = 13
+  controls.minDistance = 3.2
+  controls.maxDistance = 10
   controls.target.set(0, -1.6, 0)
 
-  scene.add(new THREE.HemisphereLight('#e7fbff', '#3d3022', 1.35))
-  const key = new THREE.DirectionalLight('#fff2d3', 2.6)
-  key.position.set(5, 7, 4)
+  const composers = createComposers(renderer, scene, camera)
+
+  scene.add(new THREE.HemisphereLight('#d8f7ff', '#2f271f', 0.72))
+  const key = new THREE.DirectionalLight('#fff1cd', 3.45)
+  key.position.set(4.6, 7.4, 3.2)
   key.castShadow = true
+  key.shadow.mapSize.set(2048, 2048)
+  key.shadow.camera.near = 0.5
+  key.shadow.camera.far = 18
+  key.shadow.camera.left = -5
+  key.shadow.camera.right = 5
+  key.shadow.camera.top = 5
+  key.shadow.camera.bottom = -5
   scene.add(key)
-  const fill = new THREE.DirectionalLight('#7ed8dd', 1.0)
-  fill.position.set(-4, 2, -3)
+  const fill = new THREE.DirectionalLight('#79d7e2', 0.28)
+  fill.position.set(-4, 1.8, -3)
   scene.add(fill)
 
-  const grid = new THREE.GridHelper(9, 18, '#6f7b72', '#314146')
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(5.8, 5.8),
+    new THREE.MeshStandardMaterial({ color: '#162426', roughness: 0.9, metalness: 0.03, transparent: true, opacity: 0.74 }),
+  )
+  ground.name = 'PresentationGroundPlane'
+  ground.rotation.x = -Math.PI / 2
+  ground.position.y = -0.02
+  ground.receiveShadow = true
+  scene.add(ground)
+
+  const grid = new THREE.GridHelper(5.8, 10, '#78968d', '#26373b')
+  grid.name = 'PresentationGroundGrid'
+  grid.position.y = 0.003
+  grid.material.transparent = true
+  grid.material.opacity = 0.34
   scene.add(grid)
 
   const fallback = createProceduralFallbackModel()
@@ -465,6 +521,8 @@ function createTwinScene(container: HTMLDivElement): TwinScene {
     const width = Math.max(1, container.clientWidth)
     const height = Math.max(1, container.clientHeight)
     renderer.setSize(width, height, false)
+    twin.composer.setSize(width, height)
+    twin.bloomComposer.setSize(width, height)
     camera.aspect = width / height
     camera.updateProjectionMatrix()
   }
@@ -473,9 +531,12 @@ function createTwinScene(container: HTMLDivElement): TwinScene {
     scene,
     camera,
     renderer,
+    composer: composers.composer,
+    bloomComposer: composers.bloomComposer,
     controls,
     handles: fallback.handles,
     fallbackRoot: fallback.root,
+    environmentMap,
     resize,
     resizeObserver: null,
     animationFrame: null,
@@ -488,6 +549,63 @@ function createTwinScene(container: HTMLDivElement): TwinScene {
   resize()
 
   return twin
+}
+
+function createComposers(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
+  const bloomComposer = new EffectComposer(renderer)
+  bloomComposer.renderToScreen = false
+  bloomComposer.addPass(new RenderPass(scene, camera))
+  bloomComposer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 1.15, 0.62, 0.08))
+
+  const composer = new EffectComposer(renderer)
+  composer.addPass(new RenderPass(scene, camera))
+  composer.addPass(new ShaderPass(
+    new THREE.ShaderMaterial({
+      uniforms: {
+        baseTexture: { value: null },
+        bloomTexture: { value: bloomComposer.renderTarget2.texture },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D baseTexture;
+        uniform sampler2D bloomTexture;
+        varying vec2 vUv;
+        void main() {
+          gl_FragColor = texture2D(baseTexture, vUv) + texture2D(bloomTexture, vUv);
+        }
+      `,
+      defines: {},
+    }),
+    'baseTexture',
+  ))
+
+  return { bloomComposer, composer }
+}
+
+function renderTwinScene(twin: TwinScene) {
+  const darkenedMaterials = new Map<string, THREE.Material | THREE.Material[]>()
+  twin.scene.traverse(object => darkenNonBloomed(object, darkenedMaterials))
+  twin.bloomComposer.render()
+  twin.scene.traverse(object => restoreMaterial(object, darkenedMaterials))
+  twin.composer.render()
+}
+
+function darkenNonBloomed(object: THREE.Object3D, materials: Map<string, THREE.Material | THREE.Material[]>) {
+  if (!isMesh(object) || object.layers.test(SELECTIVE_BLOOM_LAYER)) return
+  materials.set(object.uuid, object.material)
+  object.material = DARK_BLOOM_MATERIAL
+}
+
+function restoreMaterial(object: THREE.Object3D, materials: Map<string, THREE.Material | THREE.Material[]>) {
+  if (!isMesh(object)) return
+  const material = materials.get(object.uuid)
+  if (material) object.material = material
 }
 
 function createProceduralFallbackModel(): { root: THREE.Group; handles: ModelHandles } {
@@ -553,8 +671,8 @@ function createGlbHandles(root: THREE.Object3D): ModelHandles {
     surfacePumpPivot,
     surfaceUnitFallback: surfacePumpPivot || walkingBeam || horseHead ? null : findObject(root, ['SurfaceUnit']),
     downholePump: findObject(root, ['SRPPump']),
-    steamFlow: findObject(root, ['SteamFlow', 'SteamParticle']),
-    oilFlow: findObject(root, ['OilFlow', 'OilParticle', 'WellboreLiquid']),
+    steamFlow: findObject(root, ['SteamFlow']) ?? findObject(root, ['SteamParticle']),
+    oilFlow: findObject(root, ['OilFlow']) ?? findObject(root, ['OilParticle', 'WellboreLiquid']),
     riskHalo: null,
   }
 }
@@ -700,7 +818,7 @@ function applyVisualState(twin: TwinScene | null, state: TwinVisualState) {
   setObjectScale(twin.handles.reservoir, 1 + state.temperatureValue * 0.035)
 }
 
-function findObject(root: THREE.Object3D, names: string[]) {
+function findObject(root: THREE.Object3D, names: string[]): THREE.Object3D | null {
   let match: THREE.Object3D | null = null
   root.traverse(object => {
     if (match) return
@@ -714,9 +832,11 @@ function prepareObjectForAnimation(root: THREE.Object3D) {
   root.traverse(object => {
     ensureBaseTransform(object)
     if (isMesh(object)) {
+      const pathName = getObjectPathName(object)
       object.castShadow = true
       object.receiveShadow = true
-      normalizeMeshMaterial(object)
+      if (isGlowObject(pathName)) object.layers.enable(BLOOM_LAYER)
+      normalizeMeshMaterial(object, pathName)
     }
   })
 }
@@ -772,9 +892,31 @@ function setMaterialOpacity(mesh: THREE.Mesh, opacity: number) {
   })
 }
 
-function normalizeMeshMaterial(mesh: THREE.Mesh) {
+function normalizeMeshMaterial(mesh: THREE.Mesh, pathName = mesh.name.toLowerCase()) {
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-  materials.forEach(material => { material.needsUpdate = true })
+  materials.forEach(material => {
+    const visualMaterial = material as THREE.Material & { color?: THREE.Color; emissive?: THREE.Color; emissiveIntensity?: number; toneMapped?: boolean }
+    if (pathName.includes('heatedreservoir')) {
+      visualMaterial.color?.set('#d26a2a')
+      visualMaterial.emissive?.set('#ff7a2e')
+      visualMaterial.emissiveIntensity = 2.75
+      visualMaterial.toneMapped = false
+    }
+    if (pathName.includes('steam')) {
+      visualMaterial.color?.set('#f4fdff')
+      visualMaterial.emissive?.set('#bff5ff')
+      visualMaterial.emissiveIntensity = 2.15
+      visualMaterial.toneMapped = false
+    }
+    if (pathName.includes('oil')) {
+      visualMaterial.color?.set(pathName.includes('arrow') ? '#cc8a2e' : '#2b1a0c')
+    }
+    material.needsUpdate = true
+  })
+}
+
+function isGlowObject(pathName: string) {
+  return pathName.includes('heatedreservoir') || pathName.includes('steam')
 }
 
 function fitObjectToScene(object: THREE.Object3D, targetSize: number) {
@@ -789,6 +931,30 @@ function fitObjectToScene(object: THREE.Object3D, targetSize: number) {
   object.position.sub(center.multiplyScalar(scale))
 }
 
+function frameCameraToObject(twin: TwinScene, object: THREE.Object3D) {
+  const box = new THREE.Box3().setFromObject(object)
+  const size = new THREE.Vector3()
+  const center = new THREE.Vector3()
+  box.getSize(size)
+  box.getCenter(center)
+
+  const maxSize = Math.max(size.x, size.y, size.z) || 1
+  const halfFov = THREE.MathUtils.degToRad(twin.camera.fov * 0.5)
+  const fitHeightDistance = maxSize / (2 * Math.tan(halfFov))
+  const fitWidthDistance = fitHeightDistance / Math.max(0.1, twin.camera.aspect)
+  const distance = Math.max(fitHeightDistance, fitWidthDistance) * 1.08
+  const viewDirection = new THREE.Vector3(0.78, 0.38, 1).normalize()
+
+  twin.camera.position.copy(center).add(viewDirection.multiplyScalar(distance))
+  twin.camera.near = Math.max(0.05, distance / 120)
+  twin.camera.far = distance * 8
+  twin.camera.updateProjectionMatrix()
+  twin.controls.target.copy(center).add(new THREE.Vector3(0, size.y * 0.03, 0))
+  twin.controls.minDistance = distance * 0.42
+  twin.controls.maxDistance = distance * 2.4
+  twin.controls.update()
+}
+
 function disposeTwinScene(twin: TwinScene) {
   twin.disposed = true
   if (twin.animationFrame !== null) window.cancelAnimationFrame(twin.animationFrame)
@@ -796,6 +962,9 @@ function disposeTwinScene(twin: TwinScene) {
   window.removeEventListener('resize', twin.resize)
   twin.controls.dispose()
   disposeObject(twin.scene)
+  twin.composer.dispose()
+  twin.bloomComposer.dispose()
+  twin.environmentMap?.dispose()
   twin.renderer.dispose()
   twin.renderer.domElement.remove()
 }
