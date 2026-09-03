@@ -87,7 +87,9 @@ type ModelHandles = {
   reservoir: THREE.Object3D | null
   pressureShell: THREE.Object3D | null
   rod: THREE.Object3D | null
-  pump: THREE.Object3D | null
+  walkingBeam: THREE.Object3D | null
+  horseHead: THREE.Object3D | null
+  surfaceUnitFallback: THREE.Object3D | null
   downholePump: THREE.Object3D | null
   steamFlow: THREE.Object3D | null
   oilFlow: THREE.Object3D | null
@@ -525,23 +527,25 @@ function createProceduralFallbackModel(): { root: THREE.Group; handles: ModelHan
   root.add(steamFlow, oilFlow, riskHalo)
   prepareObjectForAnimation(root)
 
-  return { root, handles: { root, reservoir, pressureShell, rod, pump, downholePump: null, steamFlow, oilFlow, riskHalo } }
+  return { root, handles: { root, reservoir, pressureShell, rod, walkingBeam: pump, horseHead: null, surfaceUnitFallback: null, downholePump: null, steamFlow, oilFlow, riskHalo } }
 }
 
 function createGlbHandles(root: THREE.Object3D): ModelHandles {
   const reservoir = findObject(root, ['Reservoir'])
-  // The GLB contains a downhole SRPPump mesh before the visible surface-unit meshes
-  // in traversal order. Keep surface beam/horsehead rotation separate so normal
-  // pumping animates the visible walking beam, while SRPPump receives only subtle
-  // downhole motion when present. This stays a visual approximation, not a
-  // calibrated kinematic model.
-  const surfacePump = findObject(root, ['WalkingBeam', 'HorseHead', 'SurfaceUnit'])
+  // Keep moving surface-unit parts separate from the static SurfaceUnit base/posts.
+  // SurfaceUnit is only a graceful fallback for alternate GLBs that lack named beam
+  // or horsehead meshes. SRPPump remains downhole-only. This stays a visual
+  // approximation, not a calibrated kinematic model.
+  const walkingBeam = findObject(root, ['WalkingBeam'])
+  const horseHead = findObject(root, ['HorseHead'])
   return {
     root,
     reservoir,
     pressureShell: findObject(root, ['HeatedReservoirRegion', 'Reservoir']) ?? reservoir,
     rod: findObject(root, ['SuckerRod']),
-    pump: surfacePump,
+    walkingBeam,
+    horseHead,
+    surfaceUnitFallback: walkingBeam || horseHead ? null : findObject(root, ['SurfaceUnit']),
     downholePump: findObject(root, ['SRPPump']),
     steamFlow: findObject(root, ['SteamFlow', 'SteamParticle']),
     oilFlow: findObject(root, ['OilFlow', 'OilParticle', 'WellboreLiquid']),
@@ -600,11 +604,21 @@ function animateTwin(twin: TwinScene, state: TwinVisualState, delta: number, ela
   const pumpRate = Math.max(0.05, state.pumpStrokeSpeed / 4)
   const pumpPhase = Math.sin(elapsed * pumpRate * speed)
   setObjectYOffset(twin.handles.rod, pumpPhase * state.rodStrokeAmplitude)
-  rotateObjectZ(twin.handles.pump, pumpPhase * 0.18)
+  animateSurfacePump(twin.handles, pumpPhase * 0.18)
   setObjectYOffset(twin.handles.downholePump, pumpPhase * state.rodStrokeAmplitude * 0.12)
   setObjectScale(twin.handles.pressureShell, 1 + state.pressureIntensity * 0.16)
   setObjectScale(twin.handles.reservoir, 1 + state.temperatureValue * 0.035)
   if (twin.handles.riskHalo) twin.handles.riskHalo.rotation.z += delta * speed * (0.25 + state.riskLevel)
+}
+
+function animateSurfacePump(handles: ModelHandles, rotationAmount: number) {
+  if (handles.walkingBeam || handles.horseHead) {
+    rotateObjectZ(handles.walkingBeam, rotationAmount)
+    rotateObjectZ(handles.horseHead, rotationAmount)
+    return
+  }
+
+  rotateObjectZ(handles.surfaceUnitFallback, rotationAmount)
 }
 
 function animateFlow(flow: THREE.Object3D | null, offset: number, intensity: number) {
