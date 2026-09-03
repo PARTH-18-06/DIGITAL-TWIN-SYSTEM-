@@ -5,6 +5,7 @@
     "steamVolume": 1000,
     "injectionPressure": 20,
     "soakTime": 24,
+    "productionCutoff": 10,
     "strokeLength": 60,
     "spm": 8,
     "vfdFrequency": 40
@@ -15,6 +16,7 @@
     "steamVolume": 950,
     "injectionPressure": 20,
     "soakTime": 22,
+    "productionCutoff": 10,
     "strokeLength": 60,
     "spm": 7,
     "vfdFrequency": 37
@@ -24,15 +26,25 @@
       "steamVolume": 950,
       "injectionPressure": 20,
       "soakTime": 22,
+      "productionCutoff": 10,
       "strokeLength": 60,
       "spm": 7,
-      "vfdFrequency": 37
+      "vfdFrequency": 37,
+      "reservoirTemperature": 62,
+      "reservoirPressure": 36
     },
     "predictions": {
       "oilProduction": 40,
       "sor": 4.1,
       "energyPerBarrel": 2.25,
+      "rodFloatingRisk": 0.12,
+      "impactLoadingRisk": 0.28,
+      "pumpUnsettingRisk": 0.18,
       "rodFailureRisk": 0.03
+    },
+    "backendData": {
+      "source": "development-mock",
+      "wellId": "demo-well"
     }
   }
 }

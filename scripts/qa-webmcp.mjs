@@ -45,6 +45,7 @@ try {
         steamVolume: 1100,
         injectionPressure: 22,
         soakTime: 26,
+        productionCutoff: 11,
         strokeLength: 62,
         spm: 6.5,
         vfdFrequency: 35,
@@ -53,12 +54,21 @@ try {
         oilProduction: 42,
         sor: 3.9,
         energyPerBarrel: 2.1,
+        rodFloatingRisk: 0.1,
+        impactLoadingRisk: 0.22,
+        pumpUnsettingRisk: 0.16,
         rodFailureRisk: 0.02,
       },
     });
 
     await new Promise((resolve) => window.requestAnimationFrame(resolve));
     const after = await tools.read_digital_twin_state.execute({});
+    const directState = window.getDigitalTwinState();
+    window.setDigitalTwinSimulationSpeed(4);
+    window.startDigitalTwinSimulation();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    window.pauseDigitalTwinSimulation();
+    const timelineState = window.getDigitalTwinState();
 
     let rejectedInvalid = false;
     try {
@@ -69,11 +79,16 @@ try {
 
     return {
       names,
-      beforeMode: before.mode,
-      appliedMode: applied.mode,
-      afterMode: after.mode,
-      appliedTemperature: applied.parameters.reservoirTemperature,
-      afterTemperature: after.aiRecommendedOperation.reservoirTemperature,
+      beforeMode: before.selectedMode,
+      appliedMode: applied.selectedMode,
+      afterMode: after.selectedMode,
+      appliedTemperature: applied.inputParameters.reservoirTemperature,
+      appliedCutoff: applied.inputParameters.productionCutoff,
+      afterTemperature: after.inputParameters.reservoirTemperature,
+      directOilLevel: directState.digitalTwinCalculated.oilLevel,
+      directRodMovement: directState.digitalTwinCalculated.rodMovement,
+      timelinePhase: timelineState.phase,
+      timelineProgress: timelineState.cycleProgress,
       rejectedInvalid,
     };
   });
@@ -86,6 +101,15 @@ try {
   }
   if (result.appliedTemperature !== 66 || result.afterTemperature !== 66) {
     throw new Error('Apply tool did not update recommended parameters');
+  }
+  if (result.appliedCutoff !== 11) {
+    throw new Error('Apply tool did not preserve productionCutoff');
+  }
+  if (!Number.isFinite(result.directOilLevel) || !result.directRodMovement) {
+    throw new Error('getDigitalTwinState did not return calculated output');
+  }
+  if (!result.timelinePhase || result.timelineProgress <= 0) {
+    throw new Error('Simulation controls did not advance the timeline');
   }
   if (!result.rejectedInvalid) {
     throw new Error('Invalid WebMCP input was not rejected');

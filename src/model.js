@@ -7,11 +7,13 @@ export const TWIN_OBJECT_NAMES = [
   'SteamFlow',
   'ProductionTubing',
   'OilFlow',
+  'WellboreLiquid',
   'SuckerRod',
   'SRPPump',
   'Motor',
   'VFD',
   'SurfaceUnit',
+  'SurfaceProductionLine',
 ];
 
 export function createWellModel() {
@@ -58,6 +60,16 @@ export function createWellModel() {
   tubing.position.set(0, -2.35, 0);
   objects.ProductionTubing = tubing;
   group.add(tubing);
+
+  const wellboreLiquid = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.205, 0.205, 1, 36),
+    materials.liquid,
+  );
+  wellboreLiquid.name = 'WellboreLiquid';
+  wellboreLiquid.position.set(0, -5.68, 0);
+  wellboreLiquid.scale.y = 0.15;
+  objects.WellboreLiquid = wellboreLiquid;
+  group.add(wellboreLiquid);
 
   const rodAssembly = new THREE.Group();
   rodAssembly.name = 'SuckerRod';
@@ -123,6 +135,16 @@ export function createWellModel() {
   objects.OilFlow = oilFlow;
   group.add(oilFlow);
 
+  const surfaceProductionLine = createCylinderBetween(
+    new THREE.Vector3(0, 0.98, 0.08),
+    new THREE.Vector3(3.08, 0.98, 0.08),
+    0.075,
+    materials.productionLine,
+    'SurfaceProductionLine',
+  );
+  objects.SurfaceProductionLine = surfaceProductionLine;
+  group.add(surfaceProductionLine);
+
   const surfaceUnit = createSurfaceUnit(materials);
   objects.SurfaceUnit = surfaceUnit;
   group.add(surfaceUnit);
@@ -140,6 +162,17 @@ export function createWellModel() {
   vfd.castShadow = true;
   objects.VFD = vfd;
   group.add(vfd);
+
+  const productionTank = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.48, 0.48, 0.82, 40),
+    materials.tank,
+  );
+  productionTank.name = 'ProductionReceiver';
+  productionTank.position.set(3.55, 0.47, 0.08);
+  productionTank.rotation.z = Math.PI / 2;
+  productionTank.castShadow = true;
+  objects.ProductionReceiver = productionTank;
+  group.add(productionTank);
 
   const comparisonHeatMarker = new THREE.Mesh(
     new THREE.SphereGeometry(1, 40, 16),
@@ -239,6 +272,15 @@ function createMaterials() {
       opacity: 0.6,
       blending: THREE.AdditiveBlending,
     }),
+    liquid: new THREE.MeshPhysicalMaterial({
+      color: '#a6732a',
+      roughness: 0.32,
+      metalness: 0.02,
+      transmission: 0.12,
+      thickness: 0.28,
+      transparent: true,
+      opacity: 0.58,
+    }),
     oilParticles: new THREE.PointsMaterial({
       color: '#f2c35b',
       size: 0.052,
@@ -246,6 +288,13 @@ function createMaterials() {
       opacity: 0.78,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
+    }),
+    productionLine: new THREE.MeshStandardMaterial({
+      color: '#d6c06e',
+      metalness: 0.46,
+      roughness: 0.28,
+      transparent: true,
+      opacity: 0.76,
     }),
     steel: new THREE.MeshStandardMaterial({
       color: '#9eadb0',
@@ -261,6 +310,11 @@ function createMaterials() {
       color: '#27363d',
       metalness: 0.2,
       roughness: 0.5,
+    }),
+    tank: new THREE.MeshStandardMaterial({
+      color: '#617172',
+      metalness: 0.42,
+      roughness: 0.34,
     }),
     compare: new THREE.MeshBasicMaterial({
       color: '#f5f4a6',
@@ -348,6 +402,7 @@ function createLabels() {
     ['SteamInjector', [-2.55, 1.38, -0.38]],
     ['Reservoir', [2.35, -4.04, 0.05]],
     ['ProductionTubing', [0.8, -1.58, 0.1]],
+    ['WellboreLiquid', [-0.92, -3.35, 0.18]],
     ['SRPPump', [0.72, -5.52, 0.12]],
     ['SurfaceUnit', [1.35, 1.85, 0.05]],
     ['VFD', [3.68, 0.85, -0.82]],

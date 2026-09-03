@@ -232,7 +232,8 @@ input {
 }
 
 .dt-tab svg,
-.dt-actions svg {
+.dt-actions svg,
+.dt-sim-actions svg {
   width: 15px;
   height: 15px;
 }
@@ -266,11 +267,13 @@ input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 390px;
   gap: 16px;
+  align-items: start;
   padding: 16px;
 }
 
 .dt-viewport-panel {
   position: relative;
+  height: calc(100vh - 154px);
   min-height: 620px;
   overflow: hidden;
   border: 1px solid rgba(25, 39, 43, 0.22);
@@ -328,7 +331,7 @@ input {
   right: 14px;
   bottom: 14px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   pointer-events: none;
 }
@@ -336,7 +339,7 @@ input {
 .dt-risk {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 12px;
@@ -358,8 +361,10 @@ input {
 }
 
 .dt-risk small {
+  grid-column: 2;
   color: rgba(248, 247, 237, 0.75);
   font-size: 12px;
+  text-align: right;
 }
 
 .dt-risk-low {
@@ -421,14 +426,59 @@ input {
   gap: 12px;
 }
 
+.dt-cycle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.dt-cycle-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(36, 75, 87, 0.13);
+}
+
+.dt-cycle-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #48a9a6, #edb95e, #d75f45);
+  transition: width 180ms ease;
+}
+
+.dt-cycle strong {
+  color: #203036;
+  font-size: 13px;
+  text-align: right;
+}
+
+.dt-sim-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.dt-sim-actions button {
+  min-width: 0;
+}
+
 .dt-control {
   display: grid;
   gap: 8px;
 }
 
+.dt-speed-control {
+  padding-top: 2px;
+}
+
 .dt-control-meta,
 .dt-control-inputs,
 .dt-compare-row,
+.dt-output-row,
 .dt-prediction-row {
   display: grid;
   align-items: center;
@@ -478,6 +528,7 @@ input {
 }
 
 .dt-compare-grid,
+.dt-output-grid,
 .dt-predictions {
   display: grid;
   gap: 7px;
@@ -500,6 +551,25 @@ input {
 .dt-compare-row strong {
   color: #15262a;
   text-align: right;
+}
+
+.dt-output-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 31px;
+  padding: 0 2px;
+  border-bottom: 1px solid rgba(37, 54, 58, 0.08);
+  color: #5b6867;
+  font-size: 13px;
+}
+
+.dt-output-row:last-child {
+  border-bottom: 0;
+}
+
+.dt-output-row strong {
+  color: #142629;
+  text-align: right;
+  text-transform: uppercase;
 }
 
 .dt-prediction-row {
@@ -528,8 +598,16 @@ input {
     grid-template-columns: 1fr;
   }
 
+  .dt-viewport-panel {
+    height: 620px;
+  }
+
   .dt-side {
     overflow: visible;
+  }
+
+  .dt-risk-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -549,6 +627,7 @@ input {
   }
 
   .dt-viewport-panel {
+    height: 540px;
     min-height: 540px;
   }
 

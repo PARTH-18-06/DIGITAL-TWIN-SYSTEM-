@@ -36,9 +36,12 @@ const materials = {
   injector: new THREE.MeshStandardMaterial({ color: '#8fd8e8', metalness: 0.5, roughness: 0.24 }),
   steam: new THREE.MeshBasicMaterial({ color: '#d6fbff' }),
   oil: new THREE.MeshBasicMaterial({ color: '#f2c35b' }),
+  liquid: new THREE.MeshStandardMaterial({ color: '#a6732a', transparent: true, opacity: 0.58 }),
+  productionLine: new THREE.MeshStandardMaterial({ color: '#d6c06e', metalness: 0.46, roughness: 0.28 }),
   surface: new THREE.MeshStandardMaterial({ color: '#9eadb0', metalness: 0.55, roughness: 0.27 }),
   motor: new THREE.MeshStandardMaterial({ color: '#244b57', metalness: 0.3, roughness: 0.46 }),
   vfd: new THREE.MeshStandardMaterial({ color: '#27363d', metalness: 0.2, roughness: 0.5 }),
+  tank: new THREE.MeshStandardMaterial({ color: '#617172', metalness: 0.42, roughness: 0.34 }),
 };
 
 const root = new THREE.Group();
@@ -49,8 +52,10 @@ addMesh(root, 'Reservoir', new THREE.BoxGeometry(7.8, 1.05, 4.5), materials.rese
 addMesh(root, 'HeatedReservoirRegion', new THREE.SphereGeometry(1.8, 32, 16), materials.heat, [-0.18, -4.62, 0], [1.2, 0.25, 0.75]);
 addMesh(root, 'Well', new THREE.CylinderGeometry(0.28, 0.28, 6.85, 36, 1, true), materials.casing, [0, -2.35, 0]);
 addMesh(root, 'ProductionTubing', new THREE.CylinderGeometry(0.1, 0.1, 6.7, 28, 1, true), materials.tubing, [0, -2.35, 0]);
+addMesh(root, 'WellboreLiquid', new THREE.CylinderGeometry(0.205, 0.205, 1, 36), materials.liquid, [0, -3.5, 0], [1, 3.2, 1]);
 addMesh(root, 'SuckerRod', new THREE.CylinderGeometry(0.033, 0.033, 6.2, 18), materials.rod, [0, -2.1, 0]);
 addMesh(root, 'SRPPump', new THREE.CylinderGeometry(0.16, 0.13, 0.72, 28), materials.pump, [0, -5.55, 0]);
+root.add(cylinderBetween([0, 0.98, 0.08], [3.08, 0.98, 0.08], 0.075, materials.productionLine, 'SurfaceProductionLine'));
 
 const injector = new THREE.Group();
 injector.name = 'SteamInjector';
@@ -97,6 +102,7 @@ root.add(surfaceUnit);
 
 addMesh(root, 'Motor', new THREE.BoxGeometry(0.7, 0.55, 0.55), materials.motor, [2.45, 0.98, 0]);
 addMesh(root, 'VFD', new THREE.BoxGeometry(0.58, 0.9, 0.25), materials.vfd, [3.28, 0.52, -0.82]);
+addMesh(root, 'ProductionReceiver', new THREE.CylinderGeometry(0.48, 0.48, 0.82, 40), materials.tank, [3.55, 0.47, 0.08], [1, 1, 1], [0, 0, Math.PI / 2]);
 
 const arrayBuffer = await exportBinary(scene);
 await writeGlb('models/well.glb', arrayBuffer);

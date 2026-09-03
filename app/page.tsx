@@ -9,6 +9,8 @@ import {
   Flame,
   Gauge,
   GitCompare,
+  Pause,
+  Play,
   RotateCcw,
   Ruler,
   SlidersHorizontal,
@@ -40,8 +42,20 @@ import testData from '@/test-data.json';
 type Mode = 'current' | 'optimized';
 type Operation = typeof DEFAULT_OPERATION;
 type ParameterKey = keyof Operation;
-type PredictionMap = Record<string, number>;
+type PredictionMap = Record<string, number | string>;
 type ToolResult = Record<string, unknown>;
+type TwinOutput = {
+  systemState?: string;
+  selectedMode?: string;
+  phase?: string;
+  cycleProgress?: number | null;
+  inputParameters?: Operation;
+  digitalTwinCalculated?: Record<string, number | string>;
+  aiPredicted?: PredictionMap;
+  backendDatabase?: Record<string, unknown>;
+  risks?: Record<string, string>;
+  riskScores?: Record<string, number>;
+};
 type WebMcpTool = {
   name: string;
   title: string;
@@ -66,10 +80,18 @@ const parameterIcons: Record<string, ComponentType<{ className?: string }>> = {
   steamVolume: Flame,
   injectionPressure: Zap,
   soakTime: Timer,
+  productionCutoff: Gauge,
   strokeLength: Ruler,
   spm: Activity,
   vfdFrequency: SlidersHorizontal,
 };
+
+const riskKeys = [
+  'rodFloatingRisk',
+  'impactLoadingRisk',
+  'pumpUnsettingRisk',
+  'rodFailureRisk',
+] as const;
 
 const initialCurrent = normalizeOperation(
   testData.currentOperation ?? DEFAULT_OPERATION,
@@ -99,6 +121,9 @@ export default function Home() {
   });
   const [predictions, setPredictions] = useState<PredictionMap>(initialPredictions);
   const [apiStatus, setApiStatus] = useState('Development mock data loaded');
+  const [simulationRunning, setSimulationRunning] = useState(false);
+  const [simulationSpeed, setSimulationSpeedState] = useState(1);
+  const [twinOutput, setTwinOutput] = useState<TwinOutput | null>(null);
   const operationsRef = useRef(operations);
   const predictionsRef = useRef(predictions);
   const modeRef = useRef<Mode>(mode);
@@ -122,35 +147,70 @@ export default function Home() {
       initialOperation: operationsRef.current.current,
       predictions: initialPredictions,
       mode: 'current',
+      onStateChange: (output: TwinOutput) => setTwinOutput(output),
     });
     twinRef.current = twin;
 
     const browserWindow = window as Window & {
       digitalTwin?: unknown;
       updateDigitalTwin?: (payload: unknown) => unknown;
+      getDigitalTwinState?: () => unknown;
+      startDigitalTwinSimulation?: () => unknown;
+      pauseDigitalTwinSimulation?: () => unknown;
+      resetDigitalTwinSimulation?: () => unknown;
+      setDigitalTwinSimulationSpeed?: (speed: number) => unknown;
     };
 
     browserWindow.digitalTwin = twin;
     browserWindow.updateDigitalTwin = (payload: unknown) => {
-      const parsed = parseBackendPayload(
-        payload as Record<string, unknown>,
-        operationsRef.current.optimized,
-      );
+      if (!isRecord(payload)) {
+        throw new Error('updateDigitalTwin expects a parameter object or backend payload');
+      }
+
+      const isRecommendedPayload = isRecord(payload.recommendedParameters);
+      const targetMode = isRecommendedPayload ? 'optimized' : modeRef.current;
+      const fallback = operationsRef.current[targetMode];
+      const parsed = parseBackendPayload(payload, fallback);
+      const nextParameters = parsed.parameters as Operation;
+      const nextPredictions = (parsed.predictions ?? predictionsRef.current) as PredictionMap;
+
       setOperations((previous) => ({
         ...previous,
-        optimized: parsed.parameters as Operation,
+        [targetMode]: nextParameters,
       }));
-      setPredictions(parsed.predictions as PredictionMap);
-      setMode('optimized');
-      setApiStatus('Backend-style payload applied to AI Recommended Operation');
-      return twin.updateFromBackendPayload(payload as Record<string, unknown>);
+      setPredictions(nextPredictions);
+      setMode(targetMode);
+      setApiStatus(
+        isRecommendedPayload
+          ? 'Backend AI recommendation applied'
+          : 'Direct updateDigitalTwin parameters applied',
+      );
+
+      twin.setMode(targetMode);
+      twin.updateDigitalTwin(nextParameters, {
+        predictions: targetMode === 'optimized' ? nextPredictions : {},
+        backendData: getBackendData(payload),
+      });
+
+      return twin.getDigitalTwinState();
     };
+    browserWindow.getDigitalTwinState = () => twin.getDigitalTwinState();
+    browserWindow.startDigitalTwinSimulation = () => twin.startSimulation();
+    browserWindow.pauseDigitalTwinSimulation = () => twin.pauseSimulation();
+    browserWindow.resetDigitalTwinSimulation = () => twin.resetSimulation();
+    browserWindow.setDigitalTwinSimulationSpeed = (speed: number) =>
+      twin.setSimulationSpeed(speed);
 
     return () => {
       twin.dispose();
       twinRef.current = null;
       delete browserWindow.digitalTwin;
       delete browserWindow.updateDigitalTwin;
+      delete browserWindow.getDigitalTwinState;
+      delete browserWindow.startDigitalTwinSimulation;
+      delete browserWindow.pauseDigitalTwinSimulation;
+      delete browserWindow.resetDigitalTwinSimulation;
+      delete browserWindow.setDigitalTwinSimulationSpeed;
     };
   }, []);
 
@@ -163,9 +223,10 @@ export default function Home() {
       current: operations.current,
       recommended: operations.optimized,
     });
-    twin.updateDigitalTwin(operations[mode], {
+    const result = twin.updateDigitalTwin(operations[mode], {
       predictions: mode === 'optimized' ? predictions : {},
     });
+    setTwinOutput(result.output as TwinOutput);
   }, [mode, operations, predictions]);
 
   useEffect(() => {
@@ -179,7 +240,7 @@ export default function Home() {
         name: 'read_digital_twin_state',
         title: 'Read digital twin state',
         description:
-          'Return the selected digital twin mode, current operation, recommended operation, predictions, and derived visual summary.',
+          'Return current/optimized inputs, AI predictions, simulation phase, and calculated Digital Twin output.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -187,20 +248,12 @@ export default function Home() {
         },
         annotations: { readOnlyHint: true, untrustedContentHint: false },
         execute() {
-          const selectedMode = modeRef.current;
-          const selected = operationsRef.current[selectedMode];
-          const visualState = deriveTwinState(
-            selected,
-            selectedMode === 'optimized' ? predictionsRef.current : {},
-          );
-
-          return {
-            mode: selectedMode,
+          return (twinRef.current?.getDigitalTwinState() ?? {
+            mode: modeRef.current,
             currentOperation: operationsRef.current.current,
             aiRecommendedOperation: operationsRef.current.optimized,
             predictions: predictionsRef.current,
-            summary: summarizeTwinState(visualState),
-          };
+          }) as ToolResult;
         },
       },
       {
@@ -218,7 +271,13 @@ export default function Home() {
             },
             predictions: {
               type: 'object',
-              additionalProperties: { type: 'number' },
+              additionalProperties: {
+                anyOf: [{ type: 'number' }, { type: 'string' }],
+              },
+            },
+            backendData: {
+              type: 'object',
+              additionalProperties: true,
             },
           },
           required: ['recommendedParameters'],
@@ -233,7 +292,6 @@ export default function Home() {
           const parsed = parseBackendPayload(input, operationsRef.current.optimized);
           const nextParameters = parsed.parameters as Operation;
           const nextPredictions = parsed.predictions as PredictionMap;
-          const nextState = deriveTwinState(nextParameters, nextPredictions);
 
           setOperations((previous) => ({
             ...previous,
@@ -245,14 +303,10 @@ export default function Home() {
           twinRef.current?.setMode('optimized');
           twinRef.current?.updateDigitalTwin(nextParameters, {
             predictions: nextPredictions,
+            backendData: getBackendData(input),
           });
 
-          return {
-            mode: 'optimized',
-            parameters: nextParameters,
-            predictions: nextPredictions,
-            summary: summarizeTwinState(nextState),
-          };
+          return (twinRef.current?.getDigitalTwinState() ?? {}) as ToolResult;
         },
       },
     ];
@@ -270,7 +324,6 @@ export default function Home() {
     return () => lifecycle.abort();
   }, []);
 
-
   const selectedOperation = operations[mode];
   const selectedState = useMemo(
     () =>
@@ -281,10 +334,30 @@ export default function Home() {
     [mode, selectedOperation, predictions],
   );
   const selectedSummary = summarizeTwinState(selectedState);
-  const currentSummary = summarizeTwinState(deriveTwinState(operations.current));
-  const optimizedSummary = summarizeTwinState(
-    deriveTwinState(operations.optimized, predictions),
+  const currentState = deriveTwinState(operations.current);
+  const optimizedState = deriveTwinState(operations.optimized, predictions);
+  const currentSummary = summarizeTwinState(currentState);
+  const optimizedSummary = summarizeTwinState(optimizedState);
+  const calculated = twinOutput?.digitalTwinCalculated ?? {};
+  const outputRisks = twinOutput?.risks ?? {};
+  const outputRiskScores = twinOutput?.riskScores ?? {};
+  const displayThermal = getOutputNumber(
+    calculated,
+    'thermalIndex',
+    selectedSummary.thermalIndex,
   );
+  const displayMobility = getOutputNumber(
+    calculated,
+    'oilMobilityIndex',
+    selectedSummary.mobilityIndex,
+  );
+  const displayOilLevel = getOutputNumber(
+    calculated,
+    'oilLevel',
+    selectedSummary.oilLevel,
+  );
+  const displayPhase = twinOutput?.phase ?? 'Manual Parameter Response';
+  const displayCycleProgress = Number(twinOutput?.cycleProgress ?? 0);
 
   function handleParameterChange(key: ParameterKey, value: number) {
     setOperations((previous) => ({
@@ -293,7 +366,7 @@ export default function Home() {
     }));
   }
 
-  function handleApplyMockPayload() {
+  function handleApplyAiOptimization() {
     const parsed = parseBackendPayload(testData.backendPayload, operations.current);
     setOperations((previous) => ({
       ...previous,
@@ -301,16 +374,49 @@ export default function Home() {
     }));
     setPredictions(parsed.predictions as PredictionMap);
     setMode('optimized');
-    setApiStatus('Mock API payload applied');
+    setApiStatus('Sample backend AI payload applied');
   }
 
-  function handleReset() {
+  function handleStartSimulation() {
+    const result = twinRef.current?.startSimulation();
+    if (result?.output) setTwinOutput(result.output as TwinOutput);
+    setSimulationRunning(true);
+    setApiStatus('CSS timeline running');
+  }
+
+  function handlePauseSimulation() {
+    const result = twinRef.current?.pauseSimulation();
+    if (result?.output) setTwinOutput(result.output as TwinOutput);
+    setSimulationRunning(false);
+    setApiStatus('CSS timeline paused');
+  }
+
+  function handleResetCycle() {
+    const result = twinRef.current?.resetSimulation();
+    if (result?.output) setTwinOutput(result.output as TwinOutput);
+    setSimulationRunning(false);
+    setApiStatus('CSS timeline reset to steam injection');
+  }
+
+  function handleSimulationSpeedChange(value: number) {
+    const speed = Math.min(6, Math.max(0.25, value));
+    setSimulationSpeedState(speed);
+    const result = twinRef.current?.setSimulationSpeed(speed);
+    if (result?.output) setTwinOutput(result.output as TwinOutput);
+  }
+
+  function handleResetAll() {
     setOperations({
       current: initialCurrent,
       optimized: initialOptimized,
     });
     setPredictions(initialPredictions);
     setMode('current');
+    setSimulationRunning(false);
+    setSimulationSpeedState(1);
+    twinRef.current?.setSimulationSpeed(1);
+    const result = twinRef.current?.resetSimulation({ disable: true });
+    if (result?.output) setTwinOutput(result.output as TwinOutput);
     setApiStatus('Development mock data loaded');
   }
 
@@ -339,19 +445,19 @@ export default function Home() {
             </TabsTrigger>
             <TabsTrigger value="optimized" className="dt-tab">
               <GitCompare aria-hidden="true" />
-              AI Recommended
+              AI Optimized
             </TabsTrigger>
           </TabsList>
         </Tabs>
 
         <div className="dt-actions">
-          <Button type="button" variant="outline" onClick={handleReset}>
+          <Button type="button" variant="outline" onClick={handleResetAll}>
             <RotateCcw aria-hidden="true" />
             Reset
           </Button>
-          <Button type="button" onClick={handleApplyMockPayload}>
+          <Button type="button" onClick={handleApplyAiOptimization}>
             <CloudCog aria-hidden="true" />
-            Apply API Mock
+            Apply AI Optimization
           </Button>
         </div>
       </header>
@@ -359,7 +465,8 @@ export default function Home() {
       <section className="dt-statusbar" aria-label="Selected operating state">
         <Badge className="dt-mode-badge">{MODE_LABELS[mode]}</Badge>
         <span>{apiStatus}</span>
-        <span>Visual representation only, not a physics simulation</span>
+        <span>Phase: {displayPhase}</span>
+        <span>Visual representation only, not CFD or field-calibrated simulation</span>
       </section>
 
       <section className="dt-workspace">
@@ -369,29 +476,31 @@ export default function Home() {
           <div className="dt-viewport-overlay">
             <div>
               <p>Thermal index</p>
-              <strong>{selectedSummary.thermalIndex}%</strong>
+              <strong>{Math.round(displayThermal)}%</strong>
             </div>
             <div>
               <p>Oil mobility index</p>
-              <strong>{selectedSummary.mobilityIndex}%</strong>
+              <strong>{Math.round(displayMobility)}%</strong>
             </div>
             <div>
-              <p>Pump duty index</p>
-              <strong>{selectedSummary.pumpDuty}%</strong>
+              <p>Wellbore liquid level</p>
+              <strong>{Math.round(displayOilLevel)}%</strong>
             </div>
           </div>
 
           <div className="dt-risk-row" aria-label="Equipment risk indicators">
-            <RiskPill
-              label="ROD FLOATING RISK"
-              level={selectedState.rodFloatingRisk}
-              score={selectedState.rodFloatingScore}
-            />
-            <RiskPill
-              label="IMPACT LOADING"
-              level={selectedState.impactLoadingRisk}
-              score={selectedState.impactLoadingScore}
-            />
+            {riskKeys.map((key) => (
+              <RiskPill
+                key={key}
+                label={riskLabel(key)}
+                level={outputRisks[key] ?? selectedState[key]}
+                score={getOutputNumber(
+                  outputRiskScores,
+                  key,
+                  riskScoreFromState(selectedState, key) * 100,
+                )}
+              />
+            ))}
           </div>
         </section>
 
@@ -399,10 +508,66 @@ export default function Home() {
           <section className="dt-panel">
             <div className="dt-panel-heading">
               <div>
+                <p>CSS simulation timeline</p>
+                <h2>{displayPhase}</h2>
+              </div>
+              <Badge variant={simulationRunning ? 'default' : 'outline'}>
+                {simulationRunning ? 'Running' : 'Paused'}
+              </Badge>
+            </div>
+
+            <div className="dt-cycle">
+              <span className="dt-cycle-track">
+                <span
+                  className="dt-cycle-fill"
+                  style={{ width: `${Math.min(100, Math.max(0, displayCycleProgress))}%` }}
+                />
+              </span>
+              <strong>{Math.round(displayCycleProgress)}%</strong>
+            </div>
+
+            <div className="dt-sim-actions">
+              <Button type="button" onClick={handleStartSimulation}>
+                <Play aria-hidden="true" />
+                Start
+              </Button>
+              <Button type="button" variant="outline" onClick={handlePauseSimulation}>
+                <Pause aria-hidden="true" />
+                Pause
+              </Button>
+              <Button type="button" variant="outline" onClick={handleResetCycle}>
+                <RotateCcw aria-hidden="true" />
+                Reset Cycle
+              </Button>
+            </div>
+
+            <div className="dt-control dt-speed-control">
+              <span className="dt-control-meta">
+                <span>
+                  <Timer aria-hidden="true" />
+                  Simulation speed
+                </span>
+                <strong>{simulationSpeed.toFixed(2)}x</strong>
+              </span>
+              <Slider
+                min={0.25}
+                max={6}
+                step={0.25}
+                value={[simulationSpeed]}
+                onValueChange={(nextValue) =>
+                  handleSimulationSpeedChange(getSliderNumber(nextValue))
+                }
+              />
+            </div>
+          </section>
+
+          <section className="dt-panel">
+            <div className="dt-panel-heading">
+              <div>
                 <p>Operating parameters</p>
                 <h2>{MODE_LABELS[mode]}</h2>
               </div>
-              <Badge variant="outline">Mock units</Badge>
+              <Badge variant="outline">API names locked</Badge>
             </div>
 
             <div className="dt-control-list">
@@ -451,10 +616,47 @@ export default function Home() {
           <section className="dt-panel">
             <div className="dt-panel-heading">
               <div>
+                <p>Digital Twin output</p>
+                <h2>Calculated state</h2>
+              </div>
+              <Badge variant="secondary">{twinOutput?.systemState ?? 'CURRENT'}</Badge>
+            </div>
+
+            <div className="dt-output-grid">
+              <OutputRow
+                label="Reservoir temperature"
+                value={`${getOutputNumber(calculated, 'reservoirTemperature', selectedOperation.reservoirTemperature).toFixed(1)} C`}
+              />
+              <OutputRow
+                label="Oil level"
+                value={`${getOutputNumber(calculated, 'oilLevel', selectedSummary.oilLevel).toFixed(1)}%`}
+              />
+              <OutputRow
+                label="Oil flow rate"
+                value={`${getOutputNumber(calculated, 'oilFlowRate', selectedState.oilFlowRate).toFixed(2)} bpd`}
+              />
+              <OutputRow
+                label="Steam flow rate"
+                value={`${getOutputNumber(calculated, 'steamFlowRate', selectedState.steamFlowRate).toFixed(1)}`}
+              />
+              <OutputRow
+                label="Rod movement"
+                value={String(calculated.rodMovement ?? selectedState.rodMovement)}
+              />
+              <OutputRow
+                label="Pressure state"
+                value={String(calculated.pressureState ?? selectedState.pressureRisk)}
+              />
+            </div>
+          </section>
+
+          <section className="dt-panel">
+            <div className="dt-panel-heading">
+              <div>
                 <p>Current vs optimized</p>
                 <h2>Before / after view</h2>
               </div>
-              <Badge variant="secondary">Demo state</Badge>
+              <Badge variant="secondary">AI-ready</Badge>
             </div>
 
             <div className="dt-compare-grid">
@@ -469,9 +671,14 @@ export default function Home() {
                 after={`${optimizedSummary.mobilityIndex}%`}
               />
               <CompareRow
-                label="Viscosity index"
-                before={`${currentSummary.viscosityIndex}%`}
-                after={`${optimizedSummary.viscosityIndex}%`}
+                label="Oil level"
+                before={`${currentSummary.oilLevel}%`}
+                after={`${optimizedSummary.oilLevel}%`}
+              />
+              <CompareRow
+                label="Production flow"
+                before={`${currentState.oilFlowRate.toFixed(1)} bpd`}
+                after={`${optimizedState.oilFlowRate.toFixed(1)} bpd`}
               />
               <CompareRow
                 label="Rod floating"
@@ -502,7 +709,7 @@ export default function Home() {
                   label={meta.label}
                   unit={meta.unit}
                   value={predictions[key]}
-                  percent={key === 'rodFailureRisk'}
+                  percent={riskKeys.includes(key as (typeof riskKeys)[number])}
                 />
               ))}
             </div>
@@ -526,7 +733,7 @@ function RiskPill({
     <div className={`dt-risk dt-risk-${level.toLowerCase()}`}>
       <span>{label}</span>
       <strong>{level}</strong>
-      <small>{Math.round(score * 100)}%</small>
+      <small>{Math.round(score)}%</small>
     </div>
   );
 }
@@ -549,12 +756,13 @@ function CompareRow({
   );
 }
 
-function getSliderNumber(value: number | readonly number[]) {
-  return Number(Array.isArray(value) ? value[0] : value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function OutputRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="dt-output-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 function PredictionRow({
@@ -564,16 +772,17 @@ function PredictionRow({
   percent = false,
 }: {
   label: string;
-  value?: number;
+  value?: number | string;
   unit: string;
   percent?: boolean;
 }) {
-  const hasValue = Number.isFinite(Number(value));
-  const displayValue = hasValue
+  const numeric = Number(value);
+  const hasNumericValue = Number.isFinite(numeric);
+  const displayValue = hasNumericValue
     ? percent
-      ? `${Math.round(Number(value) * 100)}%`
-      : `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 2)}${unit ? ` ${unit}` : ''}`
-    : 'Pending';
+      ? `${Math.round(numeric > 1 ? numeric : numeric * 100)}%`
+      : `${numeric.toFixed(numeric % 1 === 0 ? 0 : 2)}${unit ? ` ${unit}` : ''}`
+    : String(value ?? 'Pending');
 
   return (
     <div className="dt-prediction-row">
@@ -581,4 +790,36 @@ function PredictionRow({
       <strong>{displayValue}</strong>
     </div>
   );
+}
+
+function getSliderNumber(value: number | readonly number[]) {
+  return Number(Array.isArray(value) ? value[0] : value);
+}
+
+function getOutputNumber(
+  source: Record<string, number | string>,
+  key: string,
+  fallback: number,
+) {
+  const value = Number(source[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function riskScoreFromState(state: Record<string, unknown>, key: string) {
+  const scoreKey = key.replace('Risk', 'Score');
+  const value = Number(state[scoreKey]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function riskLabel(key: string) {
+  return key.replace(/([A-Z])/g, ' $1').replace(' Risk', ' risk').toUpperCase();
+}
+
+function getBackendData(payload: Record<string, unknown>) {
+  const data = payload.backendData ?? payload.database ?? {};
+  return isRecord(data) ? data : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
