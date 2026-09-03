@@ -29,9 +29,33 @@ digital-twin/
 |-- app/
 |   |-- page.tsx
 |   `-- globals.css
+|-- components/
+|   `-- DigitalTwin.tsx
 |-- README.md
 `-- test-data.json
 ```
+
+## React Component Boundary
+
+`components/DigitalTwin.tsx` exports the prop-driven twin component. In the teammate
+frontend, use the same file contents as `frontend/src/components/DigitalTwin.tsx`
+and replace `DigitalTwinPlaceholder.tsx` with it.
+
+The component accepts live snake_case API data:
+
+```tsx
+<DigitalTwin
+  well={well}
+  simulation={simulation}
+  optimization={optimization}
+  risk={risk}
+  mode={mode}
+/>
+```
+
+`null` values are handled as idle/default visual states. The mode toggle is owned by
+the parent app. CSS timeline Start, Pause, Reset, and Speed controls live inside the
+component.
 
 ## Object Names
 

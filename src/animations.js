@@ -55,6 +55,7 @@ export function createAnimationController(objects) {
       displayState.oilFlowSpeed,
       displayState.productionIndex,
       displayState.mobilityIndex,
+      displayState.oilFlowDirection,
     );
     updateRiskVisuals(elapsed);
   }
@@ -90,6 +91,7 @@ export function createAnimationController(objects) {
         amount,
       );
     });
+    displayState.oilFlowDirection = targetState.oilFlowDirection ?? 'forward';
   }
 
   function updateThermalVisuals(elapsed) {
@@ -194,16 +196,27 @@ export function createAnimationController(objects) {
   };
 }
 
-function updateFlow(flow, type, elapsed, speed, intensity, secondaryIntensity = intensity) {
+function updateFlow(
+  flow,
+  type,
+  elapsed,
+  speed,
+  intensity,
+  secondaryIntensity = intensity,
+  direction = 'forward',
+) {
   const positionAttribute = flow.geometry.getAttribute('position');
   const positions = positionAttribute.array;
   const { seeds } = flow.geometry.userData;
   const count = positionAttribute.count;
-  const flowRate = (0.04 + speed * 0.1) * (0.16 + intensity * 0.84);
+  const directionFactor =
+    direction === 'reverse' ? -1 : direction === 'stalled' ? 0 : 1;
+  const flowRate =
+    (0.04 + Math.abs(speed) * 0.1) * (0.16 + intensity * 0.84) * directionFactor;
 
   for (let index = 0; index < count; index += 1) {
     const seed = seeds[index];
-    const t = (seed + elapsed * flowRate) % 1;
+    const t = wrap01(seed + elapsed * flowRate);
     const wobble = Math.sin((elapsed + seed * 8) * 2.8) * 0.025;
     const offset = index * 3;
 
@@ -245,10 +258,15 @@ function updateFlow(flow, type, elapsed, speed, intensity, secondaryIntensity = 
   flow.material.opacity =
     type === 'steam'
       ? 0.08 + intensity * 0.18 + secondaryIntensity * 0.58
-      : 0.08 + intensity * 0.5 + secondaryIntensity * 0.24;
+      : (0.08 + intensity * 0.5 + secondaryIntensity * 0.24) *
+        (direction === 'stalled' ? 0.32 : 1);
   flow.material.size =
     type === 'steam'
       ? 0.026 + intensity * 0.025 + secondaryIntensity * 0.04
       : 0.026 + intensity * 0.056 + secondaryIntensity * 0.02;
   positionAttribute.needsUpdate = true;
+}
+
+function wrap01(value) {
+  return ((value % 1) + 1) % 1;
 }

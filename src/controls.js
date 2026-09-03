@@ -157,8 +157,10 @@ export function deriveTwinState(
   parameters = DEFAULT_OPERATION,
   predictions = {},
   simulationSnapshot = null,
+  liveSimulation = null,
 ) {
   const operation = normalizeOperation(parameters);
+  const liveState = normalizeLiveSimulation(liveSimulation);
   const steamNorm = normalize01((operation.steamVolume - 200) / 1600);
   const temperatureFactor = simulationSnapshot?.temperatureFactor ?? 1;
   const steamActivityFactor = simulationSnapshot?.steamActivityFactor ?? 1;
@@ -178,36 +180,39 @@ export function deriveTwinState(
     'predictedOilProduction',
     'production',
   ]);
-  const productionIndex =
+  let productionIndex =
     aiOilProduction === null
       ? normalize01((tempNorm * 0.45 + pumpNorm * 0.24 + pressureNorm * 0.18 + steamNorm * 0.13) * productionFactor)
       : normalize01((aiOilProduction / Math.max(operation.productionCutoff, 1)) * 0.55);
 
-  const thermalIndex = normalize01(
+  let thermalIndex = normalize01(
     tempNorm * 0.55 +
       steamNorm * steamActivityFactor * 0.3 +
       injectionNorm * 0.08 +
       soakNorm * 0.07,
   );
-  const mobilityIndex = normalize01(
+  let mobilityIndex = normalize01(
     (0.18 + thermalIndex * 0.62 + pressureNorm * 0.08 - pumpNorm * 0.05) *
       (0.55 + productionFactor * 0.45),
   );
-  const viscosityIndex = normalize01(1 - mobilityIndex);
-  const pumpDuty = normalize01(pumpNorm * 0.68 + vfdNorm * 0.22 + strokeNorm * 0.1);
-  const heatRadius = 0.8 + thermalIndex * 2.4;
-  const oilLevel = normalize01(
+  let viscosityIndex = normalize01(1 - mobilityIndex);
+  let pumpDuty = normalize01(pumpNorm * 0.68 + vfdNorm * 0.22 + strokeNorm * 0.1);
+  let heatRadius = 0.8 + thermalIndex * 2.4;
+  let oilLevel = normalize01(
     0.16 + mobilityIndex * 0.42 + productionIndex * 0.24 + pressureNorm * 0.12 - cutoffNorm * 0.08,
   );
-  const oilFlowRate =
+  let oilFlowRate =
     aiOilProduction ?? Number((operation.productionCutoff * productionIndex).toFixed(2));
   const steamFlowRate = Number(
     (operation.steamVolume * steamActivityFactor * (0.34 + injectionNorm * 0.66)).toFixed(2),
   );
-  const oilFlowSpeed = 0.18 + mobilityIndex * 1.15 + pumpDuty * 0.35 + productionIndex * 1.25;
+  let oilFlowSpeed = 0.18 + mobilityIndex * 1.15 + pumpDuty * 0.35 + productionIndex * 1.25;
   const steamFlowSpeed = 0.08 + steamNorm * steamActivityFactor * 1.55 + injectionNorm * 0.55;
   const strokeAmplitude = 0.24 + strokeNorm * 0.58;
-  const pressureRiskScore = normalize01(
+  let strokeRate = operation.spm;
+  let pumpStrokeSpeed = operation.spm;
+  let oilFlowDirection = 'forward';
+  let pressureRiskScore = normalize01(
     Math.max(0, injectionNorm - 0.78) * 1.7 + Math.max(0, 0.18 - pressureNorm) * 1.4,
   );
 
@@ -216,28 +221,80 @@ export function deriveTwinState(
   const predictedPumpUnsettingRisk = readRiskPrediction(predictions, 'pumpUnsettingRisk');
   const predictedRodFailureRisk = readRiskPrediction(predictions, 'rodFailureRisk');
 
-  const rodFloatingScore = normalize01(
+  let rodFloatingScore = normalize01(
     predictedRodFloatingRisk ??
       (pumpDuty * 0.52 + viscosityIndex * 0.36 + pressureNorm * 0.08 - thermalIndex * 0.12),
   );
-  const impactLoadingScore = normalize01(
+  let impactLoadingScore = normalize01(
     predictedImpactLoadingRisk ??
     viscosityIndex * 0.46 + pumpDuty * 0.38 + strokeNorm * 0.16 - thermalIndex * 0.08,
   );
-  const pumpUnsettingScore = normalize01(
+  let pumpUnsettingScore = normalize01(
     predictedPumpUnsettingRisk ??
       pressureRiskScore * 0.35 + pumpDuty * 0.26 + viscosityIndex * 0.2 + injectionNorm * 0.12,
   );
-  const rodFailureScore = normalize01(
+  let rodFailureScore = normalize01(
     predictedRodFailureRisk ??
       Math.max(rodFloatingScore, impactLoadingScore) * 0.45 + pumpUnsettingScore * 0.22,
   );
-  const rodMovement =
+  let rodMovement =
     Math.max(rodFloatingScore, impactLoadingScore, rodFailureScore) >= 0.68
       ? 'critical'
       : Math.max(rodFloatingScore, impactLoadingScore, rodFailureScore) >= 0.38
         ? 'warning'
         : 'normal';
+
+  if (liveState) {
+    if (liveState.temperatureColorValue !== null) {
+      thermalIndex = liveState.temperatureColorValue;
+      heatRadius = 0.8 + thermalIndex * 2.4;
+      mobilityIndex = normalize01(mobilityIndex * 0.58 + thermalIndex * 0.42);
+      viscosityIndex = normalize01(1 - mobilityIndex);
+      oilLevel = normalize01(
+        0.16 + mobilityIndex * 0.42 + productionIndex * 0.24 + pressureNorm * 0.12 - cutoffNorm * 0.08,
+      );
+    }
+
+    if (liveState.pressureIntensity !== null) {
+      pressureRiskScore = Math.max(pressureRiskScore, liveState.pressureIntensity);
+      pumpUnsettingScore = Math.max(pumpUnsettingScore, liveState.pressureIntensity * 0.64);
+    }
+
+    if (liveState.flowDirection) {
+      oilFlowDirection = liveState.flowDirection;
+    }
+
+    if (liveState.flowSpeed !== null) {
+      const flow = liveState.flowDirection === 'stalled' ? 0 : liveState.flowSpeed;
+      productionIndex = normalize01(productionIndex * 0.45 + flow * 0.55);
+      oilFlowSpeed = liveState.flowDirection === 'stalled' ? 0 : 0.12 + flow * 2.35;
+      oilFlowRate = Number((Math.max(operation.productionCutoff * flow, oilFlowRate * 0.35)).toFixed(2));
+      oilLevel = normalize01(oilLevel * 0.7 + flow * 0.3);
+    }
+
+    if (liveState.pumpStrokeSpeed !== null) {
+      pumpStrokeSpeed = clampNumber(liveState.pumpStrokeSpeed, 0, 30);
+      strokeRate = pumpStrokeSpeed;
+      pumpDuty = Math.max(pumpDuty, normalize01((pumpStrokeSpeed - 3) / 13));
+    }
+
+    if (liveState.rodMovementBehavior === 'floating_risk') {
+      rodFloatingScore = Math.max(rodFloatingScore, 0.72);
+    } else if (liveState.rodMovementBehavior === 'impact_risk') {
+      impactLoadingScore = Math.max(impactLoadingScore, 0.72);
+    }
+
+    rodFailureScore = Math.max(
+      rodFailureScore,
+      Math.max(rodFloatingScore, impactLoadingScore) * 0.58,
+    );
+    rodMovement =
+      Math.max(rodFloatingScore, impactLoadingScore, rodFailureScore) >= 0.68
+        ? 'critical'
+        : Math.max(rodFloatingScore, impactLoadingScore, rodFailureScore) >= 0.38
+          ? 'warning'
+          : 'normal';
+  }
 
   return {
     parameters: operation,
@@ -252,11 +309,12 @@ export function deriveTwinState(
     oilFlowRate,
     steamFlowRate,
     oilFlowSpeed,
+    oilFlowDirection,
     steamFlowSpeed,
     steamActivity: steamActivityFactor,
     strokeAmplitude,
-    strokeRate: operation.spm,
-    pumpStrokeSpeed: operation.spm,
+    strokeRate,
+    pumpStrokeSpeed,
     vfdNorm,
     pressureRiskScore,
     rodFloatingScore,
@@ -271,6 +329,8 @@ export function deriveTwinState(
     rodMovement,
     systemState: simulationSnapshot?.systemState ?? 'STATIC',
     simulation: simulationSnapshot,
+    liveSimulation: liveState,
+    warnings: liveState?.warnings ?? [],
     predictions,
   };
 }
@@ -393,9 +453,11 @@ export function createDigitalTwinOutput({
       pumpStrokeSpeed: Number(visualState.pumpStrokeSpeed.toFixed(1)),
       rodMovement: visualState.rodMovement,
       pressureState: visualState.pressureRisk,
+      flowDirection: visualState.oilFlowDirection,
     },
     aiPredicted: predictions,
     backendDatabase: backendData,
+    warnings: visualState.warnings ?? [],
     risks: {
       rodFloatingRisk: visualState.rodFloatingRisk,
       impactLoadingRisk: visualState.impactLoadingRisk,
@@ -431,6 +493,52 @@ function readRiskPrediction(predictions, key) {
   const number = Number(value);
   if (!Number.isFinite(number)) return null;
   return number > 1 ? normalize01(number / 100) : normalize01(number);
+}
+
+function normalizeLiveSimulation(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+
+  const flowDirection = ['forward', 'reverse', 'stalled'].includes(input.flowDirection)
+    ? input.flowDirection
+    : ['forward', 'reverse', 'stalled'].includes(input.flow_direction)
+      ? input.flow_direction
+      : 'forward';
+
+  const rodMovementBehavior = ['normal', 'floating_risk', 'impact_risk'].includes(
+    input.rodMovementBehavior,
+  )
+    ? input.rodMovementBehavior
+    : ['normal', 'floating_risk', 'impact_risk'].includes(input.rod_movement_behavior)
+      ? input.rod_movement_behavior
+      : null;
+
+  return {
+    flowSpeed: readUnitInterval(input.flowSpeed ?? input.flow_speed, 'flow'),
+    flowDirection,
+    temperatureColorValue: readUnitInterval(
+      input.temperatureColorValue ?? input.temperature_color_value,
+    ),
+    pressureIntensity: readUnitInterval(input.pressureIntensity ?? input.pressure_intensity),
+    pumpStrokeSpeed: readFiniteNumber(input.pumpStrokeSpeed ?? input.pump_stroke_speed),
+    rodMovementBehavior,
+    warnings: Array.isArray(input.warnings)
+      ? input.warnings.filter((warning) => typeof warning === 'string')
+      : [],
+  };
+}
+
+function readUnitInterval(value, mode = 'unit') {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  if (mode === 'flow' && number > 1) {
+    return normalize01(number / 100);
+  }
+  return normalize01(number);
+}
+
+function readFiniteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function smoothstep(value) {

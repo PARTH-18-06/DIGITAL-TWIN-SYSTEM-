@@ -17,6 +17,7 @@ export class DigitalTwin {
     this.parameters = normalizeOperation(options.initialOperation ?? DEFAULT_OPERATION);
     this.predictions = options.predictions ?? {};
     this.backendData = options.backendData ?? {};
+    this.liveSimulation = options.liveSimulation ?? null;
     this.onStateChange = options.onStateChange ?? null;
     this.simulation = {
       enabled: false,
@@ -36,7 +37,11 @@ export class DigitalTwin {
     });
     this.sceneApi.start();
     this.setMode(this.mode);
-    this.updateDigitalTwin(this.parameters, { predictions: this.predictions });
+    this.updateDigitalTwin(this.parameters, {
+      predictions: this.predictions,
+      backendData: this.backendData,
+      liveSimulation: this.liveSimulation,
+    });
   }
 
   updateDigitalTwin(parameters = {}, options = {}) {
@@ -52,6 +57,9 @@ export class DigitalTwin {
     }
     if (options.backendData !== undefined) {
       this.backendData = options.backendData ?? {};
+    }
+    if (options.liveSimulation !== undefined) {
+      this.liveSimulation = options.liveSimulation ?? null;
     }
     if (options.simulation !== undefined) {
       this.simulation = {
@@ -72,6 +80,7 @@ export class DigitalTwin {
       this.parameters,
       this.predictions,
       simulationSnapshot,
+      this.liveSimulation,
     );
     this.animationApi.setVisualState(visualState);
     this.lastVisualState = visualState;

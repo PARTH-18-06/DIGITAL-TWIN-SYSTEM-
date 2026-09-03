@@ -2,6 +2,62 @@
 
 This file is the handoff contract for Person 2's FastAPI backend and Person 3's AI/ML optimizer.
 
+## React Component Props
+
+`components/DigitalTwin.tsx` is the prop-driven component. In the teammate frontend,
+drop the same component in as `frontend/src/components/DigitalTwin.tsx` and mount it
+where `DigitalTwinPlaceholder.tsx` currently sits.
+
+```ts
+interface DigitalTwinProps {
+  well: {
+    id: string;
+    well_name: string;
+    reservoir_temperature: number | null;
+    reservoir_pressure: number | null;
+  } | null;
+
+  simulation: {
+    flow_speed: number;
+    flow_direction: 'forward' | 'reverse' | 'stalled';
+    temperature_color_value: number;
+    pressure_intensity: number;
+    pump_stroke_speed: number;
+    rod_movement_behavior: 'normal' | 'floating_risk' | 'impact_risk';
+    warnings: string[];
+  } | null;
+
+  optimization: {
+    recommendedParameters: {
+      steam_volume: number;
+      steam_injection_pressure: number;
+      soak_time: number;
+      production_cutoff: number;
+      stroke_length: number;
+      rpm_or_spm: number;
+      vfd_frequency: number;
+    };
+    predictions: {
+      current: Record<string, number>;
+      recommended: Record<string, number>;
+    };
+  } | null;
+
+  risk: {
+    rod_floating: { risk_score: number; category: 'LOW' | 'MEDIUM' | 'HIGH' };
+    impact_loading: { risk_score: number; category: 'LOW' | 'MEDIUM' | 'HIGH' };
+    pump_unsetting: { risk_score: number; category: 'LOW' | 'MEDIUM' | 'HIGH' };
+    rod_failure: { risk_score: number; category: 'LOW' | 'MEDIUM' | 'HIGH' };
+  } | null;
+
+  mode: 'current' | 'optimized';
+}
+```
+
+The component does not fetch. `null` means the visual falls back to a calm idle state.
+The parent owns the Current vs AI Optimized toggle through `mode`. Timeline
+Start/Pause/Reset/Speed controls are inside the component.
+
 ## Required Input Parameter Names
 
 Use exactly these names:
