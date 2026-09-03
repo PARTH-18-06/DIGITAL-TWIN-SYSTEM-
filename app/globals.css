@@ -1,0 +1,567 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+body {
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+:root {
+  --background: oklch(0.955 0.018 92);
+  --foreground: oklch(0.18 0.025 205);
+  --card: oklch(0.985 0.01 92);
+  --card-foreground: oklch(0.18 0.025 205);
+  --popover: oklch(0.99 0.009 92);
+  --popover-foreground: oklch(0.18 0.025 205);
+  --primary: oklch(0.36 0.078 191);
+  --primary-foreground: oklch(0.985 0.01 92);
+  --secondary: oklch(0.9 0.037 86);
+  --secondary-foreground: oklch(0.24 0.032 204);
+  --muted: oklch(0.91 0.018 90);
+  --muted-foreground: oklch(0.43 0.028 204);
+  --accent: oklch(0.78 0.13 60);
+  --accent-foreground: oklch(0.2 0.025 205);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.82 0.018 95);
+  --input: oklch(0.84 0.018 95);
+  --ring: oklch(0.56 0.09 190);
+  --chart-1: oklch(0.71 0.16 58);
+  --chart-2: oklch(0.57 0.11 190);
+  --chart-3: oklch(0.53 0.12 32);
+  --chart-4: oklch(0.46 0.09 144);
+  --chart-5: oklch(0.39 0.06 230);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.94 0.015 92);
+  --sidebar-foreground: oklch(0.18 0.025 205);
+  --sidebar-primary: oklch(0.36 0.078 191);
+  --sidebar-primary-foreground: oklch(0.985 0.01 92);
+  --sidebar-accent: oklch(0.9 0.037 86);
+  --sidebar-accent-foreground: oklch(0.24 0.032 204);
+  --sidebar-border: oklch(0.82 0.018 95);
+  --sidebar-ring: oklch(0.56 0.09 190);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.dt-app {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(235, 229, 214, 0.52)),
+    #eef0e7;
+  color: #132327;
+  display: flex;
+  flex-direction: column;
+}
+
+.dt-topbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(310px, 420px) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 22px;
+  border-bottom: 1px solid rgba(34, 51, 55, 0.16);
+  background: rgba(248, 247, 240, 0.92);
+  backdrop-filter: blur(10px);
+}
+
+.dt-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.dt-brand p,
+.dt-panel-heading p,
+.dt-viewport-overlay p {
+  margin: 0;
+  color: #5d6a68;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.dt-brand h1,
+.dt-panel-heading h2 {
+  margin: 2px 0 0;
+  color: #132327;
+  font-size: 18px;
+  font-weight: 760;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.dt-mark {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(95, 127, 130, 0.38);
+  border-radius: 8px;
+  background: #173138;
+  color: #bee9e8;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  box-shadow: inset 0 -10px 24px rgba(232, 148, 56, 0.2);
+}
+
+.dt-mark svg {
+  width: 23px;
+  height: 23px;
+}
+
+.dt-tabs {
+  width: 100%;
+}
+
+.dt-tabs-list {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgba(32, 50, 54, 0.12);
+  background: rgba(223, 225, 211, 0.78);
+  border-radius: 8px;
+}
+
+.dt-tab {
+  min-width: 0;
+}
+
+.dt-tab svg,
+.dt-actions svg {
+  width: 15px;
+  height: 15px;
+}
+
+.dt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dt-statusbar {
+  min-height: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 22px;
+  border-bottom: 1px solid rgba(34, 51, 55, 0.12);
+  color: #56605f;
+  font-size: 13px;
+}
+
+.dt-mode-badge {
+  background: #244b57;
+  color: #f7f5e9;
+}
+
+.dt-workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  gap: 16px;
+  padding: 16px;
+}
+
+.dt-viewport-panel {
+  position: relative;
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid rgba(25, 39, 43, 0.22);
+  border-radius: 8px;
+  background: #10191b;
+  box-shadow: 0 18px 46px rgba(30, 36, 28, 0.16);
+}
+
+.dt-viewport {
+  position: absolute;
+  inset: 0;
+}
+
+.dt-viewport canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.dt-viewport-overlay {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+  width: min(560px, calc(100% - 28px));
+  pointer-events: none;
+}
+
+.dt-viewport-overlay div,
+.dt-risk,
+.dt-panel {
+  border: 1px solid rgba(234, 240, 232, 0.16);
+  border-radius: 8px;
+}
+
+.dt-viewport-overlay div {
+  min-width: 0;
+  padding: 10px 12px;
+  background: rgba(15, 25, 27, 0.76);
+  color: #f5f4e9;
+}
+
+.dt-viewport-overlay strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.dt-risk-row {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  pointer-events: none;
+}
+
+.dt-risk {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(13, 21, 23, 0.78);
+  color: #f8f7ed;
+}
+
+.dt-risk span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dt-risk strong {
+  font-size: 13px;
+}
+
+.dt-risk small {
+  color: rgba(248, 247, 237, 0.75);
+  font-size: 12px;
+}
+
+.dt-risk-low {
+  border-color: rgba(86, 168, 135, 0.42);
+}
+
+.dt-risk-low strong {
+  color: #8be2b3;
+}
+
+.dt-risk-medium {
+  border-color: rgba(242, 178, 70, 0.62);
+}
+
+.dt-risk-medium strong {
+  color: #fac45d;
+}
+
+.dt-risk-high {
+  border-color: rgba(234, 91, 72, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(234, 91, 72, 0.28);
+}
+
+.dt-risk-high strong {
+  color: #ff8a78;
+}
+
+.dt-side {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dt-panel {
+  padding: 14px;
+  border-color: rgba(38, 55, 58, 0.13);
+  background: rgba(250, 249, 241, 0.9);
+  box-shadow: 0 10px 28px rgba(50, 48, 37, 0.08);
+}
+
+.dt-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dt-warning-icon {
+  width: 18px;
+  height: 18px;
+  color: #ba6a28;
+}
+
+.dt-control-list {
+  display: grid;
+  gap: 12px;
+}
+
+.dt-control {
+  display: grid;
+  gap: 8px;
+}
+
+.dt-control-meta,
+.dt-control-inputs,
+.dt-compare-row,
+.dt-prediction-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+}
+
+.dt-control-meta {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.dt-control-meta span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #26383b;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.dt-control-meta svg {
+  width: 15px;
+  height: 15px;
+  color: #3d6f75;
+  flex: 0 0 auto;
+}
+
+.dt-control-meta strong {
+  color: #203036;
+  font-size: 13px;
+}
+
+.dt-control-inputs {
+  grid-template-columns: minmax(0, 1fr) 74px;
+}
+
+.dt-control-inputs input {
+  width: 74px;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid rgba(33, 51, 55, 0.18);
+  border-radius: 7px;
+  background: #fffdf4;
+  color: #142629;
+  padding: 0 8px;
+  text-align: right;
+}
+
+.dt-compare-grid,
+.dt-predictions {
+  display: grid;
+  gap: 7px;
+}
+
+.dt-compare-row {
+  grid-template-columns: minmax(0, 1fr) 70px 70px;
+  min-height: 31px;
+  padding: 0 2px;
+  border-bottom: 1px solid rgba(37, 54, 58, 0.08);
+  color: #5b6867;
+  font-size: 13px;
+}
+
+.dt-compare-row:last-child,
+.dt-prediction-row:last-child {
+  border-bottom: 0;
+}
+
+.dt-compare-row strong {
+  color: #15262a;
+  text-align: right;
+}
+
+.dt-prediction-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 32px;
+  border-bottom: 1px solid rgba(37, 54, 58, 0.08);
+  color: #5b6867;
+  font-size: 13px;
+}
+
+.dt-prediction-row strong {
+  color: #142629;
+}
+
+@media (max-width: 1100px) {
+  .dt-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .dt-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .dt-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .dt-side {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 720px) {
+  .dt-topbar,
+  .dt-statusbar {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .dt-workspace {
+    padding: 12px;
+  }
+
+  .dt-brand h1 {
+    font-size: 16px;
+  }
+
+  .dt-viewport-panel {
+    min-height: 540px;
+  }
+
+  .dt-viewport-overlay,
+  .dt-risk-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dt-risk {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .dt-risk small {
+    display: none;
+  }
+}

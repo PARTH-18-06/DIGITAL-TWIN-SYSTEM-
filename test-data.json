@@ -1,0 +1,38 @@
+{
+  "currentOperation": {
+    "reservoirTemperature": 55,
+    "reservoirPressure": 35,
+    "steamVolume": 1000,
+    "injectionPressure": 20,
+    "soakTime": 24,
+    "strokeLength": 60,
+    "spm": 8,
+    "vfdFrequency": 40
+  },
+  "aiRecommendedOperation": {
+    "reservoirTemperature": 62,
+    "reservoirPressure": 36,
+    "steamVolume": 950,
+    "injectionPressure": 20,
+    "soakTime": 22,
+    "strokeLength": 60,
+    "spm": 7,
+    "vfdFrequency": 37
+  },
+  "backendPayload": {
+    "recommendedParameters": {
+      "steamVolume": 950,
+      "injectionPressure": 20,
+      "soakTime": 22,
+      "strokeLength": 60,
+      "spm": 7,
+      "vfdFrequency": 37
+    },
+    "predictions": {
+      "oilProduction": 40,
+      "sor": 4.1,
+      "energyPerBarrel": 2.25,
+      "rodFailureRisk": 0.03
+    }
+  }
+}
