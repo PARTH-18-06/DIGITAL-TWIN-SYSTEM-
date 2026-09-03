@@ -5,8 +5,13 @@ export const TWIN_OBJECT_NAMES = [
   'Reservoir',
   'SteamInjector',
   'SteamFlow',
+  'SteamFlowConduit',
   'ProductionTubing',
   'OilFlow',
+  'OilFlowConduit',
+  'UnifiedProcessFlow',
+  'ProcessSpine',
+  'ProcessTracers',
   'WellboreLiquid',
   'SuckerRod',
   'SRPPump',
@@ -22,6 +27,9 @@ export function createWellModel() {
 
   const materials = createMaterials();
   const objects = {};
+  const steamRoute = createSteamRoute();
+  const oilRoute = createOilRoute();
+  const processRoute = createProcessRoute(steamRoute, oilRoute);
 
   const reservoir = new THREE.Mesh(
     new THREE.BoxGeometry(7.8, 1.05, 4.5, 8, 1, 4),
@@ -127,13 +135,75 @@ export function createWellModel() {
   objects.SteamInjector = injector;
   group.add(injector);
 
-  const steamFlow = createParticleFlow('SteamFlow', 115, materials.steam, 'steam');
+  const steamConduit = createTubePath(
+    'SteamFlowConduit',
+    steamRoute,
+    0.04,
+    materials.steamConduit,
+  );
+  steamConduit.renderOrder = 2;
+  objects.SteamFlowConduit = steamConduit;
+  group.add(steamConduit);
+
+  const steamFlow = createParticleFlow(
+    'SteamFlow',
+    115,
+    materials.steam,
+    'steam',
+    steamRoute,
+  );
   objects.SteamFlow = steamFlow;
   group.add(steamFlow);
 
-  const oilFlow = createParticleFlow('OilFlow', 130, materials.oilParticles, 'oil');
+  const oilConduit = createTubePath(
+    'OilFlowConduit',
+    oilRoute,
+    0.052,
+    materials.oilConduit,
+  );
+  oilConduit.renderOrder = 2;
+  objects.OilFlowConduit = oilConduit;
+  group.add(oilConduit);
+
+  const oilFlow = createParticleFlow(
+    'OilFlow',
+    130,
+    materials.oilParticles,
+    'oil',
+    oilRoute,
+  );
   objects.OilFlow = oilFlow;
   group.add(oilFlow);
+
+  const processSpine = createTubePath(
+    'ProcessSpine',
+    processRoute,
+    0.044,
+    materials.processSpine,
+  );
+  processSpine.renderOrder = 4;
+  objects.ProcessSpine = processSpine;
+  group.add(processSpine);
+
+  const processFlow = createParticleFlow(
+    'UnifiedProcessFlow',
+    240,
+    materials.processParticles,
+    'process',
+    processRoute,
+  );
+  processFlow.renderOrder = 5;
+  objects.UnifiedProcessFlow = processFlow;
+  group.add(processFlow);
+
+  const processTracers = createProcessTracers(materials);
+  processTracers.renderOrder = 6;
+  objects.ProcessTracers = processTracers;
+  group.add(processTracers);
+
+  const processJunctions = createProcessJunctions(materials);
+  objects.ProcessJunctions = processJunctions;
+  group.add(processJunctions);
 
   const surfaceProductionLine = createCylinderBetween(
     new THREE.Vector3(0, 0.98, 0.08),
@@ -258,6 +328,15 @@ function createMaterials() {
       metalness: 0.52,
       roughness: 0.24,
     }),
+    steamConduit: new THREE.MeshStandardMaterial({
+      color: '#9de7ef',
+      emissive: '#1f6f7a',
+      emissiveIntensity: 0.34,
+      metalness: 0.18,
+      roughness: 0.26,
+      transparent: true,
+      opacity: 0.42,
+    }),
     steam: new THREE.PointsMaterial({
       color: '#d6fbff',
       size: 0.055,
@@ -271,6 +350,15 @@ function createMaterials() {
       transparent: true,
       opacity: 0.6,
       blending: THREE.AdditiveBlending,
+    }),
+    oilConduit: new THREE.MeshStandardMaterial({
+      color: '#d5a33c',
+      emissive: '#805217',
+      emissiveIntensity: 0.28,
+      metalness: 0.12,
+      roughness: 0.36,
+      transparent: true,
+      opacity: 0.46,
     }),
     liquid: new THREE.MeshPhysicalMaterial({
       color: '#a6732a',
@@ -286,6 +374,38 @@ function createMaterials() {
       size: 0.052,
       transparent: true,
       opacity: 0.78,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+    processSpine: new THREE.MeshBasicMaterial({
+      color: '#fff1a8',
+      transparent: true,
+      opacity: 0.36,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+    processParticles: new THREE.PointsMaterial({
+      size: 0.088,
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+    }),
+    tracer: new THREE.MeshBasicMaterial({
+      color: '#fff1a8',
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+    junction: new THREE.MeshBasicMaterial({
+      color: '#f4d77a',
+      transparent: true,
+      opacity: 0.58,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     }),
@@ -343,6 +463,93 @@ function createMaterials() {
       opacity: 0.45,
     }),
   };
+}
+
+function createSteamRoute() {
+  return [
+    new THREE.Vector3(-3.05, 0.95, -0.1),
+    new THREE.Vector3(-2.55, 0.95, -0.1),
+    new THREE.Vector3(-2.25, -0.62, -0.1),
+    new THREE.Vector3(-1.72, -2.55, -0.1),
+    new THREE.Vector3(-1.15, -4.28, -0.1),
+    new THREE.Vector3(-0.35, -4.18, 0.02),
+  ];
+}
+
+function createOilRoute() {
+  return [
+    new THREE.Vector3(-1.72, -4.14, 0.24),
+    new THREE.Vector3(-0.78, -4.24, 0.18),
+    new THREE.Vector3(-0.2, -4.82, 0.08),
+    new THREE.Vector3(0, -5.48, 0.06),
+    new THREE.Vector3(0, -3.2, 0.08),
+    new THREE.Vector3(0, -0.65, 0.08),
+    new THREE.Vector3(0, 0.98, 0.08),
+    new THREE.Vector3(1.18, 0.98, 0.08),
+    new THREE.Vector3(2.42, 0.98, 0.08),
+    new THREE.Vector3(3.42, 0.68, 0.08),
+  ];
+}
+
+function createProcessRoute(steamRoute, oilRoute) {
+  return [
+    ...steamRoute,
+    new THREE.Vector3(-0.1, -4.24, 0.08),
+    ...oilRoute.slice(2),
+  ];
+}
+
+function createTubePath(name, route, radius, material) {
+  const curve = new THREE.CatmullRomCurve3(route, false, 'centripetal', 0.45);
+  curve.arcLengthDivisions = 160;
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 160, radius, 12, false),
+    material,
+  );
+  tube.name = name;
+  tube.userData.route = route;
+  tube.userData.curve = curve;
+  return tube;
+}
+
+function createProcessJunctions(materials) {
+  const junctions = new THREE.Group();
+  junctions.name = 'ProcessJunctions';
+
+  [
+    ['SteamReservoirJunction', [-0.35, -4.18, 0.02], 0.18],
+    ['PumpIntakeJunction', [0, -5.48, 0.06], 0.14],
+    ['WellheadJunction', [0, 0.98, 0.08], 0.13],
+    ['SurfaceReceiverJunction', [3.42, 0.68, 0.08], 0.16],
+  ].forEach(([name, position, radius]) => {
+    const node = new THREE.Mesh(
+      new THREE.SphereGeometry(radius, 24, 12),
+      materials.junction.clone(),
+    );
+    node.name = name;
+    node.position.fromArray(position);
+    junctions.add(node);
+  });
+
+  return junctions;
+}
+
+function createProcessTracers(materials) {
+  const tracers = new THREE.Group();
+  tracers.name = 'ProcessTracers';
+
+  for (let index = 0; index < 6; index += 1) {
+    const tracer = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 24, 12),
+      materials.tracer.clone(),
+    );
+    tracer.name = `ProcessTracer${index + 1}`;
+    tracer.renderOrder = 6;
+    tracer.userData.seed = index / 6;
+    tracers.add(tracer);
+  }
+
+  return tracers;
 }
 
 function createSurfaceUnit(materials) {
@@ -462,20 +669,32 @@ function createCylinderBetween(start, end, radius, material, name) {
   return mesh;
 }
 
-function createParticleFlow(name, count, material, type) {
+function createParticleFlow(name, count, material, type, route = null) {
   const positions = new Float32Array(count * 3);
   const seeds = new Float32Array(count);
+  const colors = type === 'process' ? new Float32Array(count * 3) : null;
 
   for (let index = 0; index < count; index += 1) {
     seeds[index] = seeded(index + (type === 'steam' ? 40 : 120));
     positions[index * 3] = 0;
     positions[index * 3 + 1] = 0;
     positions[index * 3 + 2] = 0;
+    if (colors) {
+      colors[index * 3] = 1;
+      colors[index * 3 + 1] = 0.78;
+      colors[index * 3 + 2] = 0.34;
+    }
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.userData = { seeds, type };
+  if (route) {
+    const curve = new THREE.CatmullRomCurve3(route, false, 'centripetal', 0.45);
+    curve.arcLengthDivisions = 160;
+    geometry.userData.curve = curve;
+  }
 
   const points = new THREE.Points(geometry, material);
   points.name = name;

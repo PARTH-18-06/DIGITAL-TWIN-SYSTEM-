@@ -11,6 +11,9 @@ const RISK_HIGH = new THREE.Color('#f06a4b');
 const NORMAL_PUMP = new THREE.Color('#64727b');
 const WARNING_PUMP = new THREE.Color('#a97838');
 const DANGER_PUMP = new THREE.Color('#b94a3d');
+const STEAM_FLOW = new THREE.Color('#c9fbff');
+const HEAT_FLOW = new THREE.Color('#f39a3f');
+const OIL_FLOW = new THREE.Color('#f2c35b');
 
 export function createAnimationController(objects) {
   let targetState = deriveTwinState(DEFAULT_OPERATION);
@@ -57,6 +60,16 @@ export function createAnimationController(objects) {
       displayState.mobilityIndex,
       displayState.oilFlowDirection,
     );
+    updateFlow(
+      objects.UnifiedProcessFlow,
+      'process',
+      elapsed,
+      displayState.oilFlowSpeed + displayState.steamFlowSpeed * 0.35,
+      Math.max(displayState.thermalIndex, displayState.productionIndex),
+      Math.max(displayState.mobilityIndex, displayState.steamActivity),
+      displayState.oilFlowDirection,
+    );
+    updateConnectedSystemVisuals(elapsed);
     updateRiskVisuals(elapsed);
   }
 
@@ -174,6 +187,52 @@ export function createAnimationController(objects) {
       0.22 + displayState.productionIndex * 0.54;
   }
 
+  function updateConnectedSystemVisuals(elapsed) {
+    const systemIntensity = Math.max(
+      displayState.thermalIndex,
+      displayState.productionIndex,
+      displayState.mobilityIndex,
+    );
+    const pulse =
+      1 + Math.sin(elapsed * 5.4) * 0.04 * (0.35 + displayState.productionIndex);
+
+    objects.ProcessSpine.material.opacity = 0.12 + systemIntensity * 0.28;
+    objects.SteamFlowConduit.material.opacity =
+      0.2 + displayState.steamActivity * 0.32 + displayState.thermalIndex * 0.18;
+    objects.OilFlowConduit.material.opacity =
+      0.2 + displayState.productionIndex * 0.34 + displayState.mobilityIndex * 0.18;
+
+    objects.ProcessJunctions.children.forEach((node, index) => {
+      const phase = Math.sin(elapsed * 4.2 + index * 0.85) * 0.5 + 0.5;
+      node.scale.setScalar(pulse + phase * 0.08 * systemIntensity);
+      node.material.opacity = 0.24 + systemIntensity * 0.36 + phase * 0.14;
+      node.material.color.copy(HEAT_FLOW).lerp(OIL_FLOW, index / 3);
+    });
+
+    const processCurve = objects.UnifiedProcessFlow.geometry.userData.curve;
+    const directionFactor =
+      displayState.oilFlowDirection === 'reverse'
+        ? -1
+        : displayState.oilFlowDirection === 'stalled'
+          ? 0
+          : 1;
+    const tracerRate =
+      (0.035 + displayState.oilFlowSpeed * 0.035 + displayState.steamFlowSpeed * 0.018) *
+      directionFactor;
+
+    objects.ProcessTracers.children.forEach((tracer, index) => {
+      const t = wrap01(tracer.userData.seed + elapsed * tracerRate);
+      const phase = Math.sin(elapsed * 5.8 + index) * 0.5 + 0.5;
+      const point = processCurve.getPointAt(t);
+      tracer.position.copy(point);
+      tracer.scale.setScalar(0.82 + phase * 0.32 + systemIntensity * 0.42);
+      tracer.material.opacity =
+        (0.38 + phase * 0.22 + systemIntensity * 0.34) *
+        (displayState.oilFlowDirection === 'stalled' ? 0.42 : 1);
+      tracer.material.color.copy(getProcessColor(t, systemIntensity));
+    });
+  }
+
   function updateRiskVisuals(elapsed) {
     const riskScore = Math.max(
       displayState.rodFloatingScore,
@@ -208,11 +267,31 @@ function updateFlow(
   const positionAttribute = flow.geometry.getAttribute('position');
   const positions = positionAttribute.array;
   const { seeds } = flow.geometry.userData;
+  const curve = flow.geometry.userData.curve;
   const count = positionAttribute.count;
   const directionFactor =
     direction === 'reverse' ? -1 : direction === 'stalled' ? 0 : 1;
   const flowRate =
     (0.04 + Math.abs(speed) * 0.1) * (0.16 + intensity * 0.84) * directionFactor;
+
+  if (curve) {
+    updateCurveFlow({
+      colors: flow.geometry.getAttribute('color'),
+      count,
+      curve,
+      direction,
+      elapsed,
+      flow,
+      flowRate,
+      intensity,
+      positions,
+      positionAttribute,
+      secondaryIntensity,
+      seeds,
+      type,
+    });
+    return;
+  }
 
   for (let index = 0; index < count; index += 1) {
     const seed = seeds[index];
@@ -265,6 +344,89 @@ function updateFlow(
       ? 0.026 + intensity * 0.025 + secondaryIntensity * 0.04
       : 0.026 + intensity * 0.056 + secondaryIntensity * 0.02;
   positionAttribute.needsUpdate = true;
+}
+
+function updateCurveFlow({
+  colors,
+  count,
+  curve,
+  direction,
+  elapsed,
+  flow,
+  flowRate,
+  intensity,
+  positions,
+  positionAttribute,
+  secondaryIntensity,
+  seeds,
+  type,
+}) {
+  const colorArray = colors?.array;
+  const point = new THREE.Vector3();
+  const tangent = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const binormal = new THREE.Vector3();
+  const visibleFactor = direction === 'stalled' ? 0.35 : 1;
+
+  for (let index = 0; index < count; index += 1) {
+    const seed = seeds[index];
+    const t = wrap01(seed + elapsed * flowRate);
+    curve.getPointAt(t, point);
+    curve.getTangentAt(t, tangent).normalize();
+    normal.set(-tangent.z, 0, tangent.x).normalize();
+    if (normal.lengthSq() < 0.001) normal.set(1, 0, 0);
+    binormal.crossVectors(tangent, normal).normalize();
+
+    const radius =
+      type === 'process'
+        ? 0.055 + Math.sin(seed * 19 + elapsed * 3.2) * 0.016
+        : 0.035 + seed * 0.035;
+    const angle = seed * Math.PI * 2 + elapsed * (type === 'steam' ? 1.4 : 2.2);
+    const offset = index * 3;
+
+    positions[offset] =
+      point.x +
+      normal.x * Math.cos(angle) * radius +
+      binormal.x * Math.sin(angle) * radius;
+    positions[offset + 1] =
+      point.y +
+      normal.y * Math.cos(angle) * radius +
+      binormal.y * Math.sin(angle) * radius;
+    positions[offset + 2] =
+      point.z +
+      normal.z * Math.cos(angle) * radius +
+      binormal.z * Math.sin(angle) * radius;
+
+    if (colorArray) {
+      const color = getProcessColor(t, intensity);
+      colorArray[offset] = color.r;
+      colorArray[offset + 1] = color.g;
+      colorArray[offset + 2] = color.b;
+    }
+  }
+
+  if (colors) colors.needsUpdate = true;
+  flow.material.opacity =
+    type === 'steam'
+      ? (0.08 + intensity * 0.18 + secondaryIntensity * 0.58) * visibleFactor
+      : type === 'process'
+        ? (0.18 + intensity * 0.34 + secondaryIntensity * 0.2) * visibleFactor
+        : (0.08 + intensity * 0.5 + secondaryIntensity * 0.24) * visibleFactor;
+  flow.material.size =
+    type === 'steam'
+      ? 0.034 + intensity * 0.022 + secondaryIntensity * 0.036
+      : type === 'process'
+        ? 0.046 + intensity * 0.042 + secondaryIntensity * 0.022
+        : 0.032 + intensity * 0.05 + secondaryIntensity * 0.018;
+  positionAttribute.needsUpdate = true;
+}
+
+function getProcessColor(t, intensity) {
+  const color =
+    t < 0.44
+      ? STEAM_FLOW.clone().lerp(HEAT_FLOW, t / 0.44)
+      : HEAT_FLOW.clone().lerp(OIL_FLOW, (t - 0.44) / 0.56);
+  return color.lerp(new THREE.Color('#fff4b6'), intensity * 0.18);
 }
 
 function wrap01(value) {

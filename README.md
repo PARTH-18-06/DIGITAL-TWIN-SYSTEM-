@@ -66,8 +66,13 @@ Well
 Reservoir
 SteamInjector
 SteamFlow
+SteamFlowConduit
 ProductionTubing
 OilFlow
+OilFlowConduit
+UnifiedProcessFlow
+ProcessSpine
+ProcessTracers
 WellboreLiquid
 SuckerRod
 SRPPump
