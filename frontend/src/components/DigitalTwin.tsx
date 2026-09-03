@@ -539,9 +539,10 @@ function createGlbHandles(root: THREE.Object3D): ModelHandles {
   // approximation, not a calibrated kinematic model. The runtime pivot makes the
   // beam/head move as one pumpjack assembly even if the GLB stores them as sibling
   // meshes without a shared origin.
+  const authoredSurfacePumpPivot = findObject(root, ['SurfacePumpPivot', 'BeamPivot', 'WalkingBeamPivot'])
   const walkingBeam = findObject(root, ['WalkingBeam'])
   const horseHead = findObject(root, ['HorseHead'])
-  const surfacePumpPivot = createSurfacePumpPivot(root, walkingBeam, horseHead)
+  const surfacePumpPivot = authoredSurfacePumpPivot ?? createSurfacePumpPivot(root, walkingBeam, horseHead)
   return {
     root,
     reservoir,
@@ -550,7 +551,7 @@ function createGlbHandles(root: THREE.Object3D): ModelHandles {
     walkingBeam,
     horseHead,
     surfacePumpPivot,
-    surfaceUnitFallback: walkingBeam || horseHead ? null : findObject(root, ['SurfaceUnit']),
+    surfaceUnitFallback: surfacePumpPivot || walkingBeam || horseHead ? null : findObject(root, ['SurfaceUnit']),
     downholePump: findObject(root, ['SRPPump']),
     steamFlow: findObject(root, ['SteamFlow', 'SteamParticle']),
     oilFlow: findObject(root, ['OilFlow', 'OilParticle', 'WellboreLiquid']),
@@ -650,12 +651,40 @@ function animateFlow(flow: THREE.Object3D | null, offset: number, intensity: num
   flow.traverse(object => {
     if (!isMesh(object)) return
     ensureBaseTransform(object)
-    let y = object.position.y + offset
-    if (y > 2.9) y = -3.0
-    if (y < -3.0) y = 2.9
-    object.position.y = y
+    moveFlowObject(object, offset)
     setMaterialOpacity(object, 0.2 + clamp01(intensity) * 0.7)
   })
+}
+
+function moveFlowObject(object: THREE.Object3D, offset: number) {
+  const motion = getFlowMotion(object)
+  const base = object.userData.basePosition as THREE.Vector3
+  const center = base[motion.axis]
+  const min = center - motion.span / 2
+  const max = center + motion.span / 2
+  let value = object.position[motion.axis] + offset * motion.direction
+  while (value > max) value -= motion.span
+  while (value < min) value += motion.span
+  object.position[motion.axis] = value
+}
+
+function getFlowMotion(object: THREE.Object3D): { axis: 'x' | 'y'; direction: 1 | -1; span: number } {
+  const pathName = getObjectPathName(object)
+  if (pathName.includes('steamdown')) return { axis: 'y', direction: -1, span: 4.2 }
+  if (pathName.includes('steamreservoir')) return { axis: 'x', direction: 1, span: 1.25 }
+  if (pathName.includes('horizontal') || pathName.includes('surface')) return { axis: 'x', direction: 1, span: 2.45 }
+  if (pathName.includes('oillift') || pathName.includes('wellboreliquid') || pathName.includes('productiontubing')) return { axis: 'y', direction: 1, span: 4.9 }
+  return { axis: 'y', direction: 1, span: 5.9 }
+}
+
+function getObjectPathName(object: THREE.Object3D) {
+  const names: string[] = []
+  let cursor: THREE.Object3D | null = object
+  while (cursor) {
+    names.push(cursor.name.toLowerCase())
+    cursor = cursor.parent
+  }
+  return names.join(' ')
 }
 
 function applyVisualState(twin: TwinScene | null, state: TwinVisualState) {
