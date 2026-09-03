@@ -31,7 +31,7 @@ export default function App() {
   const runSimulation = () => { setError(''); setFieldErrors({}); setTwinMode('current'); loading('simulation', true); api.simulate(input).then(r => { setSimulation(r); return api.history(input.well_id).then(setHistory) }).catch(report).finally(() => loading('simulation', false)) }
   const runOptimization = () => { setError(''); setFieldErrors({}); setOptimization(null); loading('optimization', true); api.optimize(input).then(r => { setOptimization(r); return api.history(input.well_id).then(setHistory) }).catch(report).finally(() => loading('optimization', false)) }
   const runForecast = () => { if (!well) return; setError(''); setForecast(null); loading('forecast', true); api.forecast(well.well_name).then(r => { setForecast(r); return api.history(input.well_id).then(setHistory) }).catch(report).finally(() => loading('forecast', false)) }
-  const runRisk = () => { if (!well) return; setError(''); setRisk(null); loading('risk', true); api.risk(well.well_name).then(setRisk).catch(report).finally(() => loading('risk', false)) }
+  const runRisk = () => { if (!well) return; setError(''); setRisk(null); loading('risk', true); api.risk(input).then(setRisk).catch(report).finally(() => loading('risk', false)) }
   const visualizeRecommendation = () => { if (optimization) setTwinMode('optimized') }
   const twinOptimization = toTwinOptimization(optimization)
 

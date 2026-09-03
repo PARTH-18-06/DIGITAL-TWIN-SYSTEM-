@@ -289,10 +289,35 @@ has been applied.
 
 Returns continuous risk scores from the existing Stage 2 regressors plus
 categorical interpretations from three leakage-audited SRP classifiers.
+When only `well_id` is provided, the endpoint keeps the original history-based
+behavior and assesses the latest saved observation. When the dashboard sends the
+same current input fields used by simulation/optimization, those live form
+values are assessed instead; `oil_api` and `days_since_steam` are filled from
+the selected well/latest observation when available.
 
 ```json
 {
   "well_id": "BGH-001"
+}
+```
+
+Live dashboard request:
+
+```json
+{
+  "well_id": "00000000-0000-0000-0000-000000000001",
+  "temperature": 100,
+  "pressure": 4.2,
+  "viscosity": 1000,
+  "rpm_or_spm": 8,
+  "steam_injection_pressure": 20,
+  "steam_volume": 1000,
+  "soak_time": 24,
+  "production_cutoff": 10,
+  "stroke_length": 55,
+  "vfd_frequency": 40,
+  "fluid_level": 40,
+  "water_cut": 0.15
 }
 ```
 

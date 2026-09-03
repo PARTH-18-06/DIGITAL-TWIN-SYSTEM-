@@ -29,6 +29,9 @@ export const api = {
   simulate: (input: SimulationInput) => request<SimulationResponse>('/api/simulation', { method: 'POST', body: JSON.stringify(input) }),
   optimize: (input: SimulationInput) => request<OptimizationResponse>('/api/optimization', { method: 'POST', body: JSON.stringify(input) }),
   forecast: (wellId: string) => request<ForecastResponse>('/api/forecast/next-day', { method: 'POST', body: JSON.stringify({ well_id: wellId }) }),
-  risk: (wellId: string) => request<RiskResponse>('/api/risk', { method: 'POST', body: JSON.stringify({ well_id: wellId }) }),
+  risk: (input: SimulationInput | string) => request<RiskResponse>('/api/risk', {
+    method: 'POST',
+    body: JSON.stringify(typeof input === 'string' ? { well_id: input } : input),
+  }),
   history: (id: string) => request<HistoryResponse>(`/api/history/${encodeURIComponent(id)}`),
 }

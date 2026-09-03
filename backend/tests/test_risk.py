@@ -64,3 +64,76 @@ def test_risk_route_includes_continuous_scores_and_categories(monkeypatch):
     assert body["risks"]["rod_floating"]["risk_score"] == 0.18
     assert body["risks"]["pump_unsetting"]["category"] == "MEDIUM"
     assert body["risks"]["rod_failure"]["classifier_probability"] is None
+
+
+def test_risk_route_prefers_live_request_state_when_supplied(monkeypatch):
+    latest = {
+        "well_id": "uuid-1",
+        "reservoir_temperature": 58,
+        "reservoir_pressure": 4,
+        "oil_viscosity": 6000,
+        "oil_api": 18,
+        "days_since_steam": 3,
+        "spm": 8,
+        "injection_pressure": 20,
+        "steam_volume": 900,
+        "soak_time": 24,
+        "production_cutoff": 10,
+        "stroke_length": 55,
+        "vfd_frequency": 40,
+        "fluid_level": 40,
+        "water_cut": 0.2,
+    }
+    captured_states: list[dict] = []
+    monkeypatch.setattr("app.routers.risk.supabase_client.require_well_identifier",
+                        lambda well_id: {"id": "uuid-1", "well_name": "BGH-001", "oil_properties": {"oil_api": 18}})
+    monkeypatch.setattr("app.routers.risk.supabase_client.list_observations_for_well",
+                        lambda well_id: [latest])
+
+    def fake_predict_outputs(state: dict) -> dict:
+        captured_states.append(state)
+        return {
+            "rod_floating_risk": 0.55,
+            "impact_loading_risk": 0.45,
+            "pump_unsetting_risk": 0.35,
+            "rod_failure_risk": 0.25,
+        }
+
+    monkeypatch.setattr("app.routers.risk.predict_outputs", fake_predict_outputs)
+    monkeypatch.setattr("app.routers.risk.classify_risks",
+                        lambda state, continuous: {
+                            "risks": {
+                                "rod_floating": {"risk_score": continuous["rod_floating_risk"], "category": "MEDIUM", "classifier_probability": 0.5},
+                                "impact_loading": {"risk_score": continuous["impact_loading_risk"], "category": "MEDIUM", "classifier_probability": 0.4},
+                                "pump_unsetting": {"risk_score": continuous["pump_unsetting_risk"], "category": "LOW", "classifier_probability": 0.3},
+                                "rod_failure": {"risk_score": continuous["rod_failure_risk"], "category": "LOW", "classifier_probability": None},
+                            },
+                            "category_basis": "synthetic-dataset-relative",
+                            "field_validated": False,
+                            "model_version": "test",
+                            "validation_summary": {},
+                        })
+
+    response = TestClient(app).post("/api/risk", json={
+        "well_id": "BGH-001",
+        "temperature": 100,
+        "pressure": 4.5,
+        "viscosity": 1100,
+        "rpm_or_spm": 10,
+        "steam_injection_pressure": 22,
+        "steam_volume": 1200,
+        "soak_time": 30,
+        "production_cutoff": 11,
+        "stroke_length": 60,
+        "vfd_frequency": 45,
+        "fluid_level": 44,
+        "water_cut": 0.25,
+    })
+
+    assert response.status_code == 200
+    assert captured_states[0]["well_id"] == "uuid-1"
+    assert captured_states[0]["temperature"] == 100
+    assert captured_states[0]["steam_volume"] == 1200
+    assert captured_states[0]["rpm_or_spm"] == 10
+    assert captured_states[0]["oil_api"] == 18
+    assert captured_states[0]["days_since_steam"] == 3
