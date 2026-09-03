@@ -89,6 +89,7 @@ type ModelHandles = {
   rod: THREE.Object3D | null
   walkingBeam: THREE.Object3D | null
   horseHead: THREE.Object3D | null
+  surfacePumpPivot: THREE.Object3D | null
   surfaceUnitFallback: THREE.Object3D | null
   downholePump: THREE.Object3D | null
   steamFlow: THREE.Object3D | null
@@ -527,7 +528,7 @@ function createProceduralFallbackModel(): { root: THREE.Group; handles: ModelHan
   root.add(steamFlow, oilFlow, riskHalo)
   prepareObjectForAnimation(root)
 
-  return { root, handles: { root, reservoir, pressureShell, rod, walkingBeam: pump, horseHead: null, surfaceUnitFallback: null, downholePump: null, steamFlow, oilFlow, riskHalo } }
+  return { root, handles: { root, reservoir, pressureShell, rod, walkingBeam: pump, horseHead: null, surfacePumpPivot: pump, surfaceUnitFallback: null, downholePump: null, steamFlow, oilFlow, riskHalo } }
 }
 
 function createGlbHandles(root: THREE.Object3D): ModelHandles {
@@ -535,9 +536,12 @@ function createGlbHandles(root: THREE.Object3D): ModelHandles {
   // Keep moving surface-unit parts separate from the static SurfaceUnit base/posts.
   // SurfaceUnit is only a graceful fallback for alternate GLBs that lack named beam
   // or horsehead meshes. SRPPump remains downhole-only. This stays a visual
-  // approximation, not a calibrated kinematic model.
+  // approximation, not a calibrated kinematic model. The runtime pivot makes the
+  // beam/head move as one pumpjack assembly even if the GLB stores them as sibling
+  // meshes without a shared origin.
   const walkingBeam = findObject(root, ['WalkingBeam'])
   const horseHead = findObject(root, ['HorseHead'])
+  const surfacePumpPivot = createSurfacePumpPivot(root, walkingBeam, horseHead)
   return {
     root,
     reservoir,
@@ -545,6 +549,7 @@ function createGlbHandles(root: THREE.Object3D): ModelHandles {
     rod: findObject(root, ['SuckerRod']),
     walkingBeam,
     horseHead,
+    surfacePumpPivot,
     surfaceUnitFallback: walkingBeam || horseHead ? null : findObject(root, ['SurfaceUnit']),
     downholePump: findObject(root, ['SRPPump']),
     steamFlow: findObject(root, ['SteamFlow', 'SteamParticle']),
@@ -612,13 +617,32 @@ function animateTwin(twin: TwinScene, state: TwinVisualState, delta: number, ela
 }
 
 function animateSurfacePump(handles: ModelHandles, rotationAmount: number) {
-  if (handles.walkingBeam || handles.horseHead) {
-    rotateObjectZ(handles.walkingBeam, rotationAmount)
-    rotateObjectZ(handles.horseHead, rotationAmount)
+  if (handles.surfacePumpPivot) {
+    rotateObjectZ(handles.surfacePumpPivot, rotationAmount)
     return
   }
 
   rotateObjectZ(handles.surfaceUnitFallback, rotationAmount)
+}
+
+function createSurfacePumpPivot(root: THREE.Object3D, walkingBeam: THREE.Object3D | null, horseHead: THREE.Object3D | null) {
+  const movingParts = [walkingBeam, horseHead].filter((part): part is THREE.Object3D => Boolean(part))
+  if (movingParts.length === 0) return null
+
+  const parent = movingParts[0].parent
+  if (!parent) return null
+
+  root.updateWorldMatrix(true, true)
+  const beamBox = new THREE.Box3().setFromObject(walkingBeam ?? movingParts[0])
+  const pivotWorld = beamBox.getCenter(new THREE.Vector3())
+  const pivot = new THREE.Group()
+  pivot.name = 'SurfacePumpBeamPivot'
+  pivot.position.copy(parent.worldToLocal(pivotWorld))
+  parent.add(pivot)
+  pivot.updateWorldMatrix(true, false)
+  movingParts.forEach(part => pivot.attach(part))
+  ensureBaseTransform(pivot)
+  return pivot
 }
 
 function animateFlow(flow: THREE.Object3D | null, offset: number, intensity: number) {
