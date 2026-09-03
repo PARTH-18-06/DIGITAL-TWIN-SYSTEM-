@@ -1,0 +1,57 @@
+{
+  "feature_order": [
+    "steam_volume",
+    "injection_pressure",
+    "soak_time",
+    "production_cutoff",
+    "reservoir_temperature",
+    "reservoir_pressure",
+    "oil_viscosity",
+    "oil_api",
+    "stroke_length",
+    "spm",
+    "vfd_frequency",
+    "fluid_level",
+    "water_cut"
+  ],
+  "targets": [
+    "oil_production",
+    "steam_oil_ratio",
+    "energy_per_barrel",
+    "rod_floating_risk",
+    "impact_loading_risk",
+    "pump_unsetting_risk",
+    "rod_failure_risk"
+  ],
+  "held_out_wells": [
+    "BGH-001",
+    "BGH-009",
+    "BGH-012",
+    "BGH-017",
+    "BGH-024"
+  ],
+  "train_wells": [
+    "BGH-002",
+    "BGH-003",
+    "BGH-004",
+    "BGH-005",
+    "BGH-006",
+    "BGH-007",
+    "BGH-008",
+    "BGH-010",
+    "BGH-011",
+    "BGH-013",
+    "BGH-014",
+    "BGH-015",
+    "BGH-016",
+    "BGH-018",
+    "BGH-019",
+    "BGH-020",
+    "BGH-021",
+    "BGH-022",
+    "BGH-023",
+    "BGH-025"
+  ],
+  "split_strategy": "grouped by well_id; 20 train wells, 5 held-out test wells",
+  "random_state": 42
+}

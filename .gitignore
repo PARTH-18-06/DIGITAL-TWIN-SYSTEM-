@@ -1,0 +1,26 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Python / test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs and generated runtime output
+*.log
+logs/
+
+# Generated ML/report artifacts
+ai_ml/reports/
+outputs/
+
+# Large local data/model artifacts should stay outside git.
+/data/
+/models/
+*.joblib
+*.pkl
+*.pickle

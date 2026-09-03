@@ -1,0 +1,9 @@
+import type { HistoryResponse } from '../api/types'
+export function HistoryPanel({ history, loading }: { history: HistoryResponse | null; loading: boolean }) {
+  const totalRuns = (history?.simulation_runs.length ?? 0) + (history?.optimization_runs.length ?? 0) + (history?.forecast_runs.length ?? 0)
+  return <section className="panel wide"><div className="section-heading"><h2>Run history</h2>{history && <span className="count">{totalRuns} runs</span>}</div>{loading ? <p className="muted">Loading history...</p> : !totalRuns ? <p className="empty">No simulation, forecast, or optimization runs recorded for this well.</p> : <div className="history-list">{history?.simulation_runs.map(run => <article key={run.id}><div><strong>Simulation - {new Date(run.created_at).toLocaleString()}</strong><small>{run.id}</small></div><span>{run.simulation_output.simulation.flow_direction}</span><span>Failure risk {Math.round(run.simulation_output.simulation.risk_scores.pump_failure_risk * 100)}%</span></article>)}{history?.forecast_runs.map(run => <article key={run.id}><div><strong>Forecast - {new Date(run.created_at).toLocaleString()}</strong><small>{run.id}</small></div><span>{run.forecast_date}</span><span>Oil {format(run.predicted_oil_production)}</span></article>)}{history?.optimization_runs.map(run => <article key={run.id}><div><strong>Optimization - {new Date(run.created_at).toLocaleString()}</strong><small>{run.id}</small></div><span>Score {format(run.predicted_results.current_score)} -&gt; {format(run.predicted_results.recommended_score)}</span><span>Oil {format(run.predicted_results.current.oil_production)} -&gt; {format(run.predicted_results.recommended.oil_production)}</span></article>)}</div>}</section>
+}
+
+function format(value: number | undefined) {
+  return value === undefined ? '-' : Number(value).toFixed(2)
+}

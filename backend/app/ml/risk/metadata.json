@@ -1,0 +1,237 @@
+{
+  "model_version": "srp-risk-classifier-v1",
+  "dataset_type": "physics-informed synthetic dataset",
+  "category_basis": "synthetic-dataset-relative",
+  "field_validated": false,
+  "feature_order": [
+    "steam_volume",
+    "injection_pressure",
+    "soak_time",
+    "production_cutoff",
+    "reservoir_temperature",
+    "reservoir_pressure",
+    "oil_viscosity",
+    "oil_api",
+    "days_since_steam",
+    "water_cut",
+    "fluid_level",
+    "stroke_length",
+    "spm",
+    "vfd_frequency"
+  ],
+  "targets": {
+    "rod_floating": "rod_floating_risk",
+    "impact_loading": "impact_loading_risk",
+    "pump_unsetting": "pump_unsetting_risk"
+  },
+  "high_risk_quantile": 0.75,
+  "held_out_wells": [
+    "BGH-001",
+    "BGH-009",
+    "BGH-012",
+    "BGH-017",
+    "BGH-024"
+  ],
+  "train_wells": [
+    "BGH-002",
+    "BGH-003",
+    "BGH-004",
+    "BGH-005",
+    "BGH-006",
+    "BGH-007",
+    "BGH-008",
+    "BGH-010",
+    "BGH-011",
+    "BGH-013",
+    "BGH-014",
+    "BGH-015",
+    "BGH-016",
+    "BGH-018",
+    "BGH-019",
+    "BGH-020",
+    "BGH-021",
+    "BGH-022",
+    "BGH-023",
+    "BGH-025"
+  ],
+  "chronological_validation": {
+    "rod_floating": {
+      "accuracy": 0.8683333333333333,
+      "precision": 0.7251755265797393,
+      "recall": 0.8566350710900474,
+      "f1": 0.7854426941879413,
+      "roc_auc": 0.9396262167081395,
+      "class_distribution": {
+        "0": 2156,
+        "1": 844
+      },
+      "confusion_matrix": [
+        [
+          1882,
+          274
+        ],
+        [
+          121,
+          723
+        ]
+      ]
+    },
+    "impact_loading": {
+      "accuracy": 0.884,
+      "precision": 0.7606217616580311,
+      "recall": 0.8625146886016452,
+      "f1": 0.8083700440528634,
+      "roc_auc": 0.9532676909818958,
+      "class_distribution": {
+        "0": 2149,
+        "1": 851
+      },
+      "confusion_matrix": [
+        [
+          1918,
+          231
+        ],
+        [
+          117,
+          734
+        ]
+      ]
+    },
+    "pump_unsetting": {
+      "accuracy": 0.8346666666666667,
+      "precision": 0.6912209889001009,
+      "recall": 0.7828571428571428,
+      "f1": 0.7341907824222936,
+      "roc_auc": 0.9014539831932772,
+      "class_distribution": {
+        "0": 2125,
+        "1": 875
+      },
+      "confusion_matrix": [
+        [
+          1819,
+          306
+        ],
+        [
+          190,
+          685
+        ]
+      ]
+    }
+  },
+  "held_out_well_validation": {
+    "rod_floating": {
+      "accuracy": 0.873,
+      "precision": 0.6945701357466063,
+      "recall": 0.8468965517241379,
+      "f1": 0.7632069608452455,
+      "roc_auc": 0.9410122015915119,
+      "class_distribution": {
+        "0": 2275,
+        "1": 725
+      },
+      "confusion_matrix": [
+        [
+          2005,
+          270
+        ],
+        [
+          111,
+          614
+        ]
+      ]
+    },
+    "impact_loading": {
+      "accuracy": 0.899,
+      "precision": 0.7603795966785291,
+      "recall": 0.8638814016172507,
+      "f1": 0.8088328075709779,
+      "roc_auc": 0.9561588744661091,
+      "class_distribution": {
+        "0": 2258,
+        "1": 742
+      },
+      "confusion_matrix": [
+        [
+          2056,
+          202
+        ],
+        [
+          101,
+          641
+        ]
+      ]
+    },
+    "pump_unsetting": {
+      "accuracy": 0.8343333333333334,
+      "precision": 0.6528089887640449,
+      "recall": 0.7555266579973993,
+      "f1": 0.70042194092827,
+      "roc_auc": 0.9013661965017117,
+      "class_distribution": {
+        "0": 2231,
+        "1": 769
+      },
+      "confusion_matrix": [
+        [
+          1922,
+          309
+        ],
+        [
+          188,
+          581
+        ]
+      ]
+    }
+  },
+  "thresholds": {
+    "rod_floating": {
+      "target": "rod_floating_risk",
+      "chronological_training_only_threshold": 0.2491379257033284,
+      "held_out_training_only_threshold": 0.25037162351574777
+    },
+    "impact_loading": {
+      "target": "impact_loading_risk",
+      "chronological_training_only_threshold": 0.2154829269684265,
+      "held_out_training_only_threshold": 0.21723523582914686
+    },
+    "pump_unsetting": {
+      "target": "pump_unsetting_risk",
+      "chronological_training_only_threshold": 0.17508489181533776,
+      "held_out_training_only_threshold": 0.17617876276360986
+    }
+  },
+  "continuous_score_thresholds": {
+    "rod_floating_risk": {
+      "medium": 0.20892980304197328,
+      "high": 0.25037162351574777
+    },
+    "impact_loading_risk": {
+      "medium": 0.17221622933195124,
+      "high": 0.21723523582914686
+    },
+    "pump_unsetting_risk": {
+      "medium": 0.1462264057943216,
+      "high": 0.17617876276360986
+    },
+    "rod_failure_risk": {
+      "medium": 0.1787630062983388,
+      "high": 0.21834857852273107
+    }
+  },
+  "leakage_audit": {
+    "risk_target_columns_in_features": false,
+    "thresholds_from_training_data_only": true,
+    "forbidden_columns": [
+      "energy_consumption",
+      "energy_per_barrel",
+      "impact_loading_risk",
+      "oil_production",
+      "pump_efficiency",
+      "pump_unsetting_risk",
+      "rod_failure_risk",
+      "rod_floating_risk",
+      "steam_oil_ratio"
+    ]
+  }
+}
