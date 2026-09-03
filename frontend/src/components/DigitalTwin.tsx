@@ -88,6 +88,7 @@ type ModelHandles = {
   pressureShell: THREE.Object3D | null
   rod: THREE.Object3D | null
   pump: THREE.Object3D | null
+  downholePump: THREE.Object3D | null
   steamFlow: THREE.Object3D | null
   oilFlow: THREE.Object3D | null
   riskHalo: THREE.Object3D | null
@@ -181,8 +182,11 @@ export function DigitalTwin(props: DigitalTwinProps) {
     new GLTFLoader().load(
       modelUrl,
       gltf => {
-        if (twin.disposed) return
         const root = gltf.scene
+        if (twin.disposed) {
+          disposeObject(root)
+          return
+        }
         root.name = 'AbhishekWellGLB'
         fitObjectToScene(root, 5.2)
         root.position.set(0, 0, 0)
@@ -521,17 +525,24 @@ function createProceduralFallbackModel(): { root: THREE.Group; handles: ModelHan
   root.add(steamFlow, oilFlow, riskHalo)
   prepareObjectForAnimation(root)
 
-  return { root, handles: { root, reservoir, pressureShell, rod, pump, steamFlow, oilFlow, riskHalo } }
+  return { root, handles: { root, reservoir, pressureShell, rod, pump, downholePump: null, steamFlow, oilFlow, riskHalo } }
 }
 
 function createGlbHandles(root: THREE.Object3D): ModelHandles {
   const reservoir = findObject(root, ['Reservoir'])
+  // The GLB contains a downhole SRPPump mesh before the visible surface-unit meshes
+  // in traversal order. Keep surface beam/horsehead rotation separate so normal
+  // pumping animates the visible walking beam, while SRPPump receives only subtle
+  // downhole motion when present. This stays a visual approximation, not a
+  // calibrated kinematic model.
+  const surfacePump = findObject(root, ['WalkingBeam', 'HorseHead', 'SurfaceUnit'])
   return {
     root,
     reservoir,
     pressureShell: findObject(root, ['HeatedReservoirRegion', 'Reservoir']) ?? reservoir,
     rod: findObject(root, ['SuckerRod']),
-    pump: findObject(root, ['SRPPump', 'WalkingBeam', 'HorseHead', 'SurfaceUnit']),
+    pump: surfacePump,
+    downholePump: findObject(root, ['SRPPump']),
     steamFlow: findObject(root, ['SteamFlow', 'SteamParticle']),
     oilFlow: findObject(root, ['OilFlow', 'OilParticle', 'WellboreLiquid']),
     riskHalo: null,
@@ -590,6 +601,7 @@ function animateTwin(twin: TwinScene, state: TwinVisualState, delta: number, ela
   const pumpPhase = Math.sin(elapsed * pumpRate * speed)
   setObjectYOffset(twin.handles.rod, pumpPhase * state.rodStrokeAmplitude)
   rotateObjectZ(twin.handles.pump, pumpPhase * 0.18)
+  setObjectYOffset(twin.handles.downholePump, pumpPhase * state.rodStrokeAmplitude * 0.12)
   setObjectScale(twin.handles.pressureShell, 1 + state.pressureIntensity * 0.16)
   setObjectScale(twin.handles.reservoir, 1 + state.temperatureValue * 0.035)
   if (twin.handles.riskHalo) twin.handles.riskHalo.rotation.z += delta * speed * (0.25 + state.riskLevel)
