@@ -1,12 +1,14 @@
 import type { FieldErrors, ForecastResponse, HistoryResponse, OptimizationResponse, RiskResponse, SimulationInput, SimulationResponse, Well } from './types'
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL
+const BASE_URL = (configuredBaseUrl || (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '')).replace(/\/$/, '')
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public fieldErrors: FieldErrors = {}) { super(message) }
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  if (!BASE_URL) throw new ApiError('VITE_API_BASE_URL is required in production.', 0)
   try {
     const response = await fetch(`${BASE_URL}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } })
     if (!response.ok) {

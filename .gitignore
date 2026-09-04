@@ -18,9 +18,8 @@ logs/
 ai_ml/reports/
 outputs/
 
-# Large local data/model artifacts should stay outside git.
+# Large local data artifacts should stay outside git.
 /data/
 /models/
-*.joblib
 *.pkl
 *.pickle

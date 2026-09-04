@@ -6,6 +6,3 @@ __pycache__/
 .coverage
 htmlcov/
 data/
-app/ml/models/*.joblib
-app/ml/forecasting/*.joblib
-app/ml/risk/*.joblib
