@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from './api/client'
+import { DEFAULT_INPUT, mergeUneditedInput, resolveWellInput } from './api/wellInput'
 import type { FieldErrors, HistoryResponse, OptimizationResponse, SimulationInput, SimulationResponse, Well } from './api/types'
 import { CssControls } from './components/CssControls'
 import { DigitalTwin, type DigitalTwinProps, type TwinMode } from './components/DigitalTwin'
@@ -15,27 +16,129 @@ import { WellSelector } from './components/WellSelector'
 import './styles.css'
 import type { ForecastResponse, RiskResponse } from './api/types'
 
-const defaults: SimulationInput = { well_id: '', temperature: 80, pressure: 4.2, viscosity: 1000, rpm_or_spm: 8, steam_injection_pressure: 20, steam_volume: 900, soak_time: 24, production_cutoff: 10, stroke_length: 55, vfd_frequency: 40, fluid_level: 40, water_cut: 0.15 }
-
 export default function App() {
   const [wells, setWells] = useState<Well[]>([]), [selectedId, setSelectedId] = useState(''), [well, setWell] = useState<Well | null>(null)
-  const [input, setInput] = useState(defaults), [simulation, setSimulation] = useState<SimulationResponse | null>(null), [optimization, setOptimization] = useState<OptimizationResponse | null>(null), [history, setHistory] = useState<HistoryResponse | null>(null)
+  const [input, setInput] = useState(DEFAULT_INPUT), [simulation, setSimulation] = useState<SimulationResponse | null>(null), [optimization, setOptimization] = useState<OptimizationResponse | null>(null), [history, setHistory] = useState<HistoryResponse | null>(null)
   const [forecast, setForecast] = useState<ForecastResponse | null>(null), [risk, setRisk] = useState<RiskResponse | null>(null), [twinMode, setTwinMode] = useState<TwinMode>('current')
   const [busy, setBusy] = useState({ wells: true, well: false, simulation: false, optimization: false, forecast: false, risk: false, history: false }), [error, setError] = useState(''), [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const loading = (key: keyof typeof busy, value: boolean) => setBusy(old => ({ ...old, [key]: value }))
   const report = (e: unknown) => { const err = e instanceof ApiError ? e : new ApiError('Unexpected error', 0); setError(err.message); setFieldErrors(err.fieldErrors) }
+  const selectionVersion = useRef(0)
+  const operatingVersion = useRef(0)
+  const editedFields = useRef(new Set<keyof SimulationInput>())
+  const needsObservation = useRef(true)
+  const selectWell = (id: string) => { if (id !== selectedId) { selectionVersion.current += 1; setSelectedId(id) } }
 
-  useEffect(() => { api.wells().then(data => { setWells(data); if (data[0]) setSelectedId(data[0].id) }).catch(report).finally(() => loading('wells', false)) }, [])
-  useEffect(() => { if (!selectedId) return; setError(''); setWell(null); setHistory(null); setSimulation(null); setOptimization(null); setForecast(null); setRisk(null); setTwinMode('current'); setInput(v => ({ ...v, well_id: selectedId })); loading('well', true); loading('history', true); Promise.allSettled([api.well(selectedId).then(setWell), api.history(selectedId).then(setHistory)]).then(results => { const rejected = results.find(r => r.status === 'rejected'); if (rejected?.status === 'rejected') report(rejected.reason) }).finally(() => { loading('well', false); loading('history', false) }) }, [selectedId])
-  const update = (key: keyof SimulationInput, value: number) => { setInput(v => ({ ...v, [key]: value })); setFieldErrors(v => ({ ...v, [key]: undefined })) }
-  const runSimulation = () => { setError(''); setFieldErrors({}); setTwinMode('current'); loading('simulation', true); api.simulate(input).then(r => { setSimulation(r); return api.history(input.well_id).then(setHistory) }).catch(report).finally(() => loading('simulation', false)) }
-  const runOptimization = () => { setError(''); setFieldErrors({}); setOptimization(null); loading('optimization', true); api.optimize(input).then(r => { setOptimization(r); return api.history(input.well_id).then(setHistory) }).catch(report).finally(() => loading('optimization', false)) }
-  const runForecast = () => { if (!well) return; setError(''); setForecast(null); loading('forecast', true); api.forecast(well.well_name).then(r => { setForecast(r); return api.history(input.well_id).then(setHistory) }).catch(report).finally(() => loading('forecast', false)) }
-  const runRisk = () => { if (!well) return; setError(''); setRisk(null); loading('risk', true); api.risk(input).then(setRisk).catch(report).finally(() => loading('risk', false)) }
+  useEffect(() => {
+    let active = true
+    api.wells().then(data => { if (active) { setWells(data); if (data[0]) setSelectedId(data[0].id) } })
+      .catch(e => { if (active) report(e) }).finally(() => { if (active) loading('wells', false) })
+    return () => { active = false }
+  }, [])
+  useEffect(() => {
+    let active = true
+    const version = ++selectionVersion.current
+    editedFields.current = new Set()
+    needsObservation.current = true
+    setError(''); setFieldErrors({}); setWell(null); setHistory(null); setSimulation(null); setOptimization(null); setForecast(null); setRisk(null); setTwinMode('current')
+    // Always reset, including optional fields and edits belonging to another well.
+    setInput({ ...DEFAULT_INPUT, well_id: selectedId })
+    setBusy(old => ({ ...old, well: Boolean(selectedId), history: Boolean(selectedId), simulation: false, optimization: false, forecast: false, risk: false }))
+    if (selectedId) {
+      Promise.allSettled([api.well(selectedId), api.history(selectedId)]).then(([wellResult, historyResult]) => {
+        if (!active || version !== selectionVersion.current) return
+        const selectedHistory = historyResult.status === 'fulfilled' ? historyResult.value : null
+        setHistory(selectedHistory)
+        if (wellResult.status === 'fulfilled') {
+          setWell(wellResult.value)
+          const prefill = resolveWellInput(wellResult.value, selectedHistory)
+          needsObservation.current = !prefill.hasOperatingParameters
+          const edits = new Set(editedFields.current)
+          setInput(current => mergeUneditedInput(current, prefill.input, edits))
+        } else report(wellResult.reason)
+        if (historyResult.status === 'rejected') report(historyResult.reason)
+        loading('well', false); loading('history', false)
+      })
+    }
+    return () => { active = false; selectionVersion.current += 1 }
+  }, [selectedId])
+  const update = (key: keyof SimulationInput, value: number) => { editedFields.current.add(key); setInput(v => ({ ...v, [key]: value })); setFieldErrors(v => ({ ...v, [key]: undefined })) }
+  const runAction = (key: 'simulation' | 'optimization' | 'forecast' | 'risk', action: (isCurrent: () => boolean) => Promise<void>) => {
+    const version = selectionVersion.current
+    const inputVersion = operatingVersion.current
+    const isCurrent = () => version === selectionVersion.current && (key === 'forecast' || inputVersion === operatingVersion.current)
+    setError(''); setFieldErrors({}); loading(key, true)
+    void action(isCurrent).catch(e => { if (isCurrent()) report(e) }).finally(() => { if (isCurrent()) loading(key, false) })
+  }
+  const refreshHistory = async (isCurrent: () => boolean) => {
+    const records = await api.history(input.well_id)
+    if (isCurrent()) setHistory(records)
+  }
+  const runSimulation = () => runAction('simulation', async isCurrent => {
+    setTwinMode('current')
+    const result = await api.simulate(input)
+    if (!isCurrent()) return
+    setSimulation(result)
+    await refreshHistory(isCurrent)
+  })
+  const runOptimization = () => runAction('optimization', async isCurrent => {
+    setOptimization(null)
+    const result = await api.optimize(input)
+    if (!isCurrent()) return
+    setOptimization(result)
+    await refreshHistory(isCurrent)
+  })
+  const runForecast = () => {
+    if (!well) return
+    runAction('forecast', async isCurrent => {
+      setForecast(null)
+      const result = await api.forecast(well.well_name)
+      if (!isCurrent()) return
+      setForecast(result)
+      // No automatic forecast POST on selection. A manually requested forecast
+      // can supply missing observations without overwriting any user edits.
+      if (needsObservation.current) {
+        const prefill = resolveWellInput(well, null, result)
+        needsObservation.current = !prefill.hasOperatingParameters
+        const edits = new Set(editedFields.current)
+        setInput(current => mergeUneditedInput(current, prefill.input, edits))
+        if (prefill.hasOperatingParameters) {
+          // Results computed for the previous defaults must not describe the
+          // newly loaded operating state, including requests still in flight.
+          operatingVersion.current += 1
+          setSimulation(null); setOptimization(null); setRisk(null); setTwinMode('current')
+          setBusy(old => ({ ...old, simulation: false, optimization: false, risk: false }))
+        }
+      }
+      await refreshHistory(isCurrent)
+    })
+  }
+  const runRisk = () => {
+    if (!well) return
+    runAction('risk', async isCurrent => { setRisk(null); const result = await api.risk(input); if (isCurrent()) setRisk(result) })
+  }
+  const selectingWell = busy.well || busy.history || input.well_id !== selectedId
   const visualizeRecommendation = () => { if (optimization) setTwinMode('optimized') }
   const twinOptimization = toTwinOptimization(optimization)
 
-  return <main><header><div><span className="eyebrow">CSS / SRP operations console</span><h1>Baghewala Well Digital Twin</h1><p>Predict. Optimize. Recover</p></div><div className="status"><i /> API integration layer</div></header>{error && <div className="error-banner" role="alert"><strong>Request failed</strong><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}>x</button></div>}<WellSelector wells={wells} value={selectedId} loading={busy.wells} onChange={setSelectedId} /><div className="workspace"><aside><WellConditions well={well} loading={busy.well} /><CssControls values={input} errors={fieldErrors} update={update} /><SrpControls values={input} errors={fieldErrors} update={update} /></aside><div className="main-column"><section className="twin-mode-toggle" aria-label="Digital twin visualization mode"><button className={twinMode === 'current' ? 'active' : ''} type="button" onClick={() => setTwinMode('current')}>Current</button><button className={twinMode === 'optimized' ? 'active' : ''} type="button" onClick={() => setTwinMode('optimized')} disabled={!twinOptimization}>Recommended</button></section><DigitalTwin well={well} simulation={simulation?.simulation ?? null} currentInput={input} optimization={twinOptimization} risk={risk?.risks ?? null} mode={twinMode} /><SimulationPanel values={input} errors={fieldErrors} loading={busy.simulation} disabled={!selectedId} update={update} onSubmit={runSimulation} /></div></div><PredictionDisplay result={simulation} /><NextDayForecast currentProduction={currentProductionFromOptimization(optimization)} result={forecast} loading={busy.forecast} disabled={!well?.well_name.startsWith('BGH-')} onRun={runForecast} /><RiskAssessment result={risk} loading={busy.risk} disabled={!well?.well_name.startsWith('BGH-')} onRun={runRisk} /><OptimizationPanel current={input} result={optimization} loading={busy.optimization} disabled={!selectedId} onRun={runOptimization} onVisualize={visualizeRecommendation} /><HistoryPanel history={history} loading={busy.history} /></main>
+  return <main>
+    <header><div><span className="eyebrow">CSS / SRP operations console</span><h1>Baghewala Well Digital Twin</h1><p>Predict. Optimize. Recover</p></div><div className="status"><i /> API integration layer</div></header>
+    {error && <div className="error-banner" role="alert"><strong>Request failed</strong><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}>x</button></div>}
+    <WellSelector wells={wells} value={selectedId} loading={busy.wells} onChange={selectWell} />
+    <div className="workspace">
+      <aside><WellConditions well={well} loading={busy.well} /><CssControls values={input} errors={fieldErrors} update={update} /><SrpControls values={input} errors={fieldErrors} update={update} /></aside>
+      <div className="main-column">
+        <section className="twin-mode-toggle" aria-label="Digital twin visualization mode"><button className={twinMode === 'current' ? 'active' : ''} type="button" onClick={() => setTwinMode('current')}>Current</button><button className={twinMode === 'optimized' ? 'active' : ''} type="button" onClick={() => setTwinMode('optimized')} disabled={!twinOptimization}>Recommended</button></section>
+        <DigitalTwin well={well} simulation={simulation?.simulation ?? null} currentInput={input} optimization={twinOptimization} risk={risk?.risks ?? null} mode={twinMode} />
+        <SimulationPanel values={input} errors={fieldErrors} loading={busy.simulation} disabled={!selectedId || selectingWell} update={update} onSubmit={runSimulation} />
+      </div>
+    </div>
+    <PredictionDisplay result={simulation} />
+    <NextDayForecast currentProduction={currentProductionFromOptimization(optimization)} result={forecast} loading={busy.forecast} disabled={selectingWell || !well?.well_name.startsWith('BGH-')} onRun={runForecast} />
+    <RiskAssessment result={risk} loading={busy.risk} disabled={selectingWell || !well?.well_name.startsWith('BGH-')} onRun={runRisk} />
+    <OptimizationPanel current={input} result={optimization} loading={busy.optimization} disabled={!selectedId || selectingWell} onRun={runOptimization} onVisualize={visualizeRecommendation} />
+    <HistoryPanel history={history} loading={busy.history} />
+  </main>
 }
 
 function toTwinOptimization(result: OptimizationResponse | null): DigitalTwinProps['optimization'] {

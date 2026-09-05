@@ -1,4 +1,5 @@
 from functools import lru_cache
+from threading import local
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from supabase import Client, create_client
@@ -34,9 +35,19 @@ def get_settings() -> Settings:
     return Settings()
 
 
-@lru_cache
+_supabase_thread_state = local()
+
+
 def get_supabase_client() -> Client | None:
     settings = get_settings()
     if not settings.supabase_configured:
         return None
-    return create_client(settings.supabase_url, settings.supabase_key)
+
+    # FastAPI runs these sync routes in a worker threadpool. Keep one Supabase
+    # client per worker thread so the underlying sync HTTP/2 client is not used
+    # concurrently across threads under browser-style parallel API calls.
+    client = getattr(_supabase_thread_state, "client", None)
+    if client is None:
+        client = create_client(settings.supabase_url, settings.supabase_key)
+        _supabase_thread_state.client = client
+    return client
