@@ -15,8 +15,11 @@ const filters: { key: RunFilter; label: string }[] = [
   { key: 'forecast', label: 'Forecast' },
 ]
 
+const latestLimit = 10
+
 export function HistoryPanel({ history, loading }: { history: HistoryResponse | null; loading: boolean }) {
   const [filter, setFilter] = useState<RunFilter>('all')
+  const [showAll, setShowAll] = useState(false)
   const counts = {
     simulation: history?.simulation_runs.length ?? 0,
     optimization: history?.optimization_runs.length ?? 0,
@@ -25,6 +28,7 @@ export function HistoryPanel({ history, loading }: { history: HistoryResponse | 
   const totalRuns = counts.simulation + counts.optimization + counts.forecast
   const timeline = useMemo(() => buildTimeline(history), [history])
   const visibleRuns = filter === 'all' ? timeline : timeline.filter(item => item.type === filter)
+  const displayedRuns = showAll ? visibleRuns : visibleRuns.slice(0, latestLimit)
 
   return (
     <section className="panel wide history-panel">
@@ -38,48 +42,47 @@ export function HistoryPanel({ history, loading }: { history: HistoryResponse | 
 
       {history && (
         <>
-          <div className="history-counters" aria-label="Run history summary">
-            <SummaryCount label="Total" value={totalRuns} />
-            <SummaryCount label="Simulation" value={counts.simulation} tone="simulation" />
-            <SummaryCount label="Optimization" value={counts.optimization} tone="optimization" />
-            <SummaryCount label="Forecast" value={counts.forecast} tone="forecast" />
-          </div>
           <div className="history-filters" aria-label="Filter run history">
             {filters.map(item => (
               <button
                 className={filter === item.key ? `active ${item.key}` : item.key}
                 key={item.key}
-                onClick={() => setFilter(item.key)}
+                onClick={() => {
+                  setFilter(item.key)
+                  setShowAll(false)
+                }}
                 type="button"
               >
                 {item.label}
+                <span>{countForFilter(item.key, counts, totalRuns)}</span>
               </button>
             ))}
           </div>
+          {visibleRuns.length > latestLimit && (
+            <div className="history-limit-row">
+              <p className="muted">
+                Showing {displayedRuns.length} of {visibleRuns.length} {filter === 'all' ? 'runs' : `${filter} runs`}, newest first.
+              </p>
+              <button onClick={() => setShowAll(value => !value)} type="button">
+                {showAll ? 'Show latest 10' : 'Show all runs'}
+              </button>
+            </div>
+          )}
         </>
       )}
 
       {loading ? (
         <p className="muted">Loading history...</p>
       ) : !totalRuns ? (
-        <p className="empty">No simulation, forecast, or optimization runs recorded for this well.</p>
+        <p className="empty">No runs recorded for this well.</p>
       ) : !visibleRuns.length ? (
-        <p className="empty">No {filter} runs recorded for this well yet.</p>
+        <p className="empty">{emptyMessage(filter)}</p>
       ) : (
-        <div className="history-list">
-          {visibleRuns.map(item => <HistoryCard item={item} key={`${item.type}-${item.id}`} />)}
+        <div className="history-list compact">
+          {displayedRuns.map(item => <HistoryCard item={item} key={`${item.type}-${item.id}`} />)}
         </div>
       )}
     </section>
-  )
-}
-
-function SummaryCount({ label, value, tone = 'all' }: { label: string; value: number; tone?: RunFilter }) {
-  return (
-    <article className={`history-counter ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </article>
   )
 }
 
@@ -97,15 +100,26 @@ function SimulationCard({ item }: { item: Extract<HistoryItem, { type: 'simulati
 
   return (
     <article className="history-card simulation">
-      <RunHeader badge="Simulation" title="Stage 1 physics run" date={item.created_at} id={item.id} />
-      <div className="history-metrics">
-        <Metric label="Flow direction" value={textOrDash(simulation?.flow_direction)} />
-        <Metric label="Flow speed" value={formatNumber(simulation?.flow_speed)} />
-        <Metric label="Max failure risk" value={formatPercent(maxRisk)} />
-        <Metric label="Warnings" value={String(warningCount)} />
-      </div>
+      <RunMain
+        badge="Simulation"
+        date={item.created_at}
+        metrics={[
+          ['Flow', sentenceCase(simulation?.flow_direction)],
+          ['Risk', formatPercent(maxRisk)],
+        ]}
+        summary={`${sentenceCase(simulation?.flow_direction)} flow • Failure risk ${formatPercent(maxRisk)} • ${warningCount} ${pluralize('warning', warningCount)}`}
+      />
       <RunDetails id={item.id}>
-        Rod behavior: {textOrDash(simulation?.rod_movement_behavior)}
+        <DetailGrid
+          rows={[
+            ['Flow direction', sentenceCase(simulation?.flow_direction)],
+            ['Flow speed', formatNumber(simulation?.flow_speed)],
+            ['Rod floating risk', formatPercent(risks?.rod_floating_risk)],
+            ['Impact loading risk', formatPercent(risks?.impact_loading_risk)],
+            ['Pump failure risk', formatPercent(risks?.pump_failure_risk)],
+            ['Rod behavior', sentenceCase(simulation?.rod_movement_behavior?.replaceAll('_', ' '))],
+          ]}
+        />
       </RunDetails>
     </article>
   )
@@ -115,63 +129,82 @@ function OptimizationCard({ item }: { item: Extract<HistoryItem, { type: 'optimi
   const predicted = item.run.predicted_results
   const current = predicted?.current ?? {}
   const recommended = predicted?.recommended ?? {}
+  const oilBefore = valueFor(current, 'oil_production', 'predicted_oil_flow_rate')
+  const oilAfter = valueFor(recommended, 'oil_production', 'predicted_oil_flow_rate')
+  const sorBefore = valueFor(current, 'steam_oil_ratio', 'sor')
+  const sorAfter = valueFor(recommended, 'steam_oil_ratio', 'sor')
 
   return (
     <article className="history-card optimization">
-      <RunHeader badge="Optimization" title="Stage 2 recommendation" date={item.created_at} id={item.id} />
-      <div className="history-metrics">
-        <Metric label="Production" value={formatChange(valueFor(current, 'oil_production', 'predicted_oil_flow_rate'), valueFor(recommended, 'oil_production', 'predicted_oil_flow_rate'))} />
-        <Metric label="SOR" value={formatChange(valueFor(current, 'steam_oil_ratio', 'sor'), valueFor(recommended, 'steam_oil_ratio', 'sor'))} />
-        <Metric label="Energy/bbl" value={formatChange(valueFor(current, 'energy_per_barrel'), valueFor(recommended, 'energy_per_barrel'))} />
-        <Metric label="Score" value={formatChange(predicted?.current_score, predicted?.recommended_score)} />
-      </div>
+      <RunMain
+        badge="Optimization"
+        date={item.created_at}
+        metrics={[
+          ['Oil', formatChange(oilBefore, oilAfter, 1)],
+          ['Score', scoreLabel(predicted?.current_score, predicted?.recommended_score)],
+        ]}
+        summary={`Oil ${formatChange(oilBefore, oilAfter, 1)} • SOR ${formatChange(sorBefore, sorAfter, 1)} • ${scoreLabel(predicted?.current_score, predicted?.recommended_score)}`}
+      />
       <RunDetails id={item.id}>
-        Optimizer: {textOrDash(String(predicted?.optimizer?.method ?? ''))}
+        <DetailGrid
+          rows={[
+            ['Production', formatChange(oilBefore, oilAfter)],
+            ['SOR', formatChange(sorBefore, sorAfter)],
+            ['Energy/barrel', formatChange(valueFor(current, 'energy_per_barrel'), valueFor(recommended, 'energy_per_barrel'))],
+            ['Score', formatChange(predicted?.current_score, predicted?.recommended_score)],
+            ['Avg risk', formatChange(averageRisk(current), averageRisk(recommended))],
+            ['Optimizer', textOrDash(String(predicted?.optimizer?.method ?? ''))],
+          ]}
+        />
       </RunDetails>
     </article>
   )
 }
 
 function ForecastCard({ item }: { item: Extract<HistoryItem, { type: 'forecast' }> }) {
-  const source = String(item.run.model_metadata?.history_source ?? item.run.model_metadata?.source ?? '')
-  const confidence = String(item.run.model_metadata?.confidence ?? item.run.model_metadata?.model_version ?? '')
+  const source = String(item.run.model_metadata?.history_source ?? item.run.model_metadata?.source ?? item.run.model_metadata?.model_version ?? '')
 
   return (
     <article className="history-card forecast">
-      <RunHeader badge="Forecast" title="Next-day production" date={item.created_at} id={item.id} />
-      <div className="history-metrics">
-        <Metric label="Forecast date" value={textOrDash(item.run.forecast_date)} />
-        <Metric label="Next-day oil" value={formatNumber(item.run.predicted_oil_production)} />
-        <Metric label="Source" value={textOrDash(source)} />
-        <Metric label="Confidence" value={textOrDash(confidence)} />
-      </div>
+      <RunMain
+        badge="Forecast"
+        date={item.created_at}
+        metrics={[
+          ['Oil', formatNumber(item.run.predicted_oil_production, 1)],
+          ['Date', textOrDash(item.run.forecast_date)],
+        ]}
+        summary={`Next-day oil: ${formatNumber(item.run.predicted_oil_production, 1)} • Forecast date: ${textOrDash(item.run.forecast_date)}`}
+      />
       <RunDetails id={item.id}>
-        Snapshot fields: {Object.keys(item.run.input_snapshot ?? {}).length}
+        <DetailGrid
+          rows={[
+            ['Forecast date', textOrDash(item.run.forecast_date)],
+            ['Predicted oil', formatNumber(item.run.predicted_oil_production)],
+            ['Confidence/source', textOrDash(source)],
+            ['Snapshot fields', String(Object.keys(item.run.input_snapshot ?? {}).length)],
+          ]}
+        />
       </RunDetails>
     </article>
   )
 }
 
-function RunHeader({ badge, title, date, id }: { badge: string; title: string; date: string; id: string }) {
+function RunMain({ badge, date, summary, metrics }: { badge: string; date: string; summary: string; metrics: [string, string][] }) {
   return (
-    <div className="history-card-header">
-      <div>
+    <div className="history-main-row">
+      <div className="history-run-head">
         <span className="history-badge">{badge}</span>
-        <strong>{title}</strong>
-      </div>
-      <div className="history-meta">
         <time>{formatDate(date)}</time>
-        <small>{id}</small>
       </div>
-    </div>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="history-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
+      <p>{summary}</p>
+      <div className="history-key-metrics">
+        {metrics.map(([label, value]) => (
+          <span key={label}>
+            <small>{label}</small>
+            {value}
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
@@ -180,9 +213,22 @@ function RunDetails({ children, id }: { children: ReactNode; id: string }) {
   return (
     <details className="history-details">
       <summary>Details</summary>
-      <small>ID: {id}</small>
-      <small>{children}</small>
+      <small className="history-id">Run ID: {id}</small>
+      {children}
     </details>
+  )
+}
+
+function DetailGrid({ rows }: { rows: [string, string][] }) {
+  return (
+    <dl className="history-detail-grid">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -196,21 +242,30 @@ function buildTimeline(history: HistoryResponse | null): HistoryItem[] {
   ].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
 }
 
+function countForFilter(filter: RunFilter, counts: { simulation: number; optimization: number; forecast: number }, total: number) {
+  return filter === 'all' ? total : counts[filter]
+}
+
+function emptyMessage(filter: RunFilter) {
+  const label = filter === 'all' ? 'runs' : `${filter} runs`
+  return `No ${label} found for this well.`
+}
+
 function formatDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
 }
 
-function formatNumber(value: number | undefined | null) {
-  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—'
+function formatNumber(value: number | undefined | null, digits = 2) {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—'
 }
 
 function formatPercent(value: number | undefined | null) {
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '—'
 }
 
-function formatChange(current: number | undefined | null, recommended: number | undefined | null) {
-  return `${formatNumber(current)} → ${formatNumber(recommended)}`
+function formatChange(current: number | undefined | null, recommended: number | undefined | null, digits = 2) {
+  return `${formatNumber(current, digits)} → ${formatNumber(recommended, digits)}`
 }
 
 function textOrDash(value: string | undefined | null) {
@@ -224,4 +279,31 @@ function maxNumber(...values: (number | undefined | null)[]) {
 
 function valueFor(record: Record<string, number>, ...keys: string[]) {
   return keys.map(key => record[key]).find(value => typeof value === 'number' && Number.isFinite(value))
+}
+
+function averageRisk(predictions?: Record<string, number>) {
+  if (!predictions) return undefined
+  const risks = [
+    predictions.rod_floating_risk,
+    predictions.impact_loading_risk,
+    predictions.pump_unsetting_risk,
+    predictions.rod_failure_risk,
+  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  return risks.length ? risks.reduce((sum, value) => sum + value, 0) / risks.length : undefined
+}
+
+function scoreLabel(current: number | undefined, recommended: number | undefined) {
+  if (typeof current !== 'number' || typeof recommended !== 'number') return 'Score —'
+  if (recommended > current) return 'Score improved'
+  if (recommended < current) return 'Score lower'
+  return 'Score unchanged'
+}
+
+function sentenceCase(value: string | undefined | null) {
+  const text = textOrDash(value)
+  return text === '—' ? text : text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function pluralize(label: string, count: number) {
+  return count === 1 ? label : `${label}s`
 }
