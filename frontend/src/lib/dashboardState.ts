@@ -18,6 +18,18 @@ export type VersionSnapshot = {
   operatingVersion: number
 }
 
+export type RequestKey = 'simulation' | 'optimization' | 'forecast' | 'risk'
+
+export type RequestToken = VersionSnapshot & {
+  key: RequestKey
+  id: number
+}
+
+export type RequestLifecycleState = {
+  nextRequestId: number
+  activeRequestIds: Record<RequestKey, number>
+}
+
 const CATEGORY_RANK: Record<RiskCategory, number> = {
   LOW: 1,
   MEDIUM: 2,
@@ -27,6 +39,51 @@ const CATEGORY_RANK: Record<RiskCategory, number> = {
 export function isVersionCurrent(snapshot: VersionSnapshot, current: VersionSnapshot) {
   return snapshot.selectionVersion === current.selectionVersion
     && snapshot.operatingVersion === current.operatingVersion
+}
+
+export function createRequestLifecycleState(): RequestLifecycleState {
+  return {
+    nextRequestId: 0,
+    activeRequestIds: {
+      simulation: 0,
+      optimization: 0,
+      forecast: 0,
+      risk: 0,
+    },
+  }
+}
+
+export function beginRequest(
+  lifecycle: RequestLifecycleState,
+  key: RequestKey,
+  versions: VersionSnapshot,
+): RequestToken {
+  const id = lifecycle.nextRequestId + 1
+  lifecycle.nextRequestId = id
+  lifecycle.activeRequestIds[key] = id
+  return { ...versions, key, id }
+}
+
+export function isRequestCurrent(
+  lifecycle: RequestLifecycleState,
+  token: RequestToken,
+  current: VersionSnapshot,
+) {
+  return lifecycle.activeRequestIds[token.key] === token.id
+    && isVersionCurrent(token, current)
+}
+
+export function adoptCurrentOperatingVersion(
+  lifecycle: RequestLifecycleState,
+  token: RequestToken,
+  current: VersionSnapshot,
+) {
+  if (
+    lifecycle.activeRequestIds[token.key] === token.id
+    && token.selectionVersion === current.selectionVersion
+  ) {
+    token.operatingVersion = current.operatingVersion
+  }
 }
 
 export function summarizeAssessedRisk(risk: Record<string, RiskItemLike> | null | undefined): RiskSummary {

@@ -11,6 +11,29 @@ The original deployment worked for the tested BGH workflows, but four issues nee
 
 Status: local fixes completed and verified. These changes do not establish field-data validation or engineering approval; they only correct dashboard state handling, risk display semantics, missing-history API behavior, and optimizer status disclosure.
 
+## Follow-up Fix Pass - 2026-09-24
+
+Status: local fixes completed and verified. No commit, push, PR, or deployment was performed in this pass.
+
+### Changes made
+
+- Forecast-driven input hydration now lets the same active forecast request finish, clear `Forecasting...`, and refresh history after it intentionally advances the operating-input version.
+- Request completion now also checks the active request id for each action type, so an older request cannot clear a newer request's loading state or overwrite newer results.
+- Simulation, optimization, forecast, and risk requests now capture their request input/well snapshot for follow-up history refreshes instead of reading a later mutable input state.
+- `frontend/package.json` now runs both `tests/*.test.ts` and `tests/*.test.mjs`, so the existing well-input regression suite is included in the default `pnpm test` command.
+
+### Local verification results
+
+- Frontend tests: 24 passed, including the 13 existing `wellInput.test.mjs` tests and new request-lifecycle regressions for forecast hydration, input-change invalidation, well-switch invalidation, and older/newer request interference.
+- Frontend production build: passed. Existing Vite warning remains for a chunk larger than 500 kB.
+- Backend tests: 46 passed, 2 existing deprecation warnings.
+- `git diff --check -- . ':!backend/.gitignore'`: passed for the files changed in this pass.
+- Full `git diff --check`: reports `backend/.gitignore:9: new blank line at EOF.` This was a pre-existing unrelated local change and was intentionally preserved per the request.
+
+### Remaining limitations
+
+- This follow-up pass did not redeploy and did not run a browser automation smoke test; it was limited to local code/test/build verification.
+
 ### Changes made
 
 - Input and well changes now invalidate displayed simulation, optimization, forecast, and risk results. In-flight responses are accepted only when their well-selection and operating-input versions still match the current dashboard state.

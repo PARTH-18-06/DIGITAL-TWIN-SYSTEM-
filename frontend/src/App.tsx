@@ -13,9 +13,15 @@ import { SimulationPanel } from './components/SimulationPanel'
 import { SrpControls } from './components/SrpControls'
 import { WellConditions } from './components/WellConditions'
 import { WellSelector } from './components/WellSelector'
-import { isVersionCurrent } from './lib/dashboardState'
+import { adoptCurrentOperatingVersion, beginRequest, createRequestLifecycleState, isRequestCurrent } from './lib/dashboardState'
 import './styles.css'
 import type { ForecastResponse, RiskResponse } from './api/types'
+
+type ActionKey = 'simulation' | 'optimization' | 'forecast' | 'risk'
+type RequestContext = {
+  isCurrent: () => boolean
+  adoptCurrentOperatingVersion: () => void
+}
 
 export default function App() {
   const [wells, setWells] = useState<Well[]>([]), [selectedId, setSelectedId] = useState(''), [well, setWell] = useState<Well | null>(null)
@@ -26,6 +32,7 @@ export default function App() {
   const report = (e: unknown) => { const err = e instanceof ApiError ? e : new ApiError('Unexpected error', 0); setError(err.message); setFieldErrors(err.fieldErrors) }
   const selectionVersion = useRef(0)
   const operatingVersion = useRef(0)
+  const requestLifecycle = useRef(createRequestLifecycleState())
   const editedFields = useRef(new Set<keyof SimulationInput>())
   const needsObservation = useRef(true)
   const selectWell = (id: string) => { if (id !== selectedId) { selectionVersion.current += 1; setSelectedId(id) } }
@@ -75,44 +82,52 @@ export default function App() {
     setInput(v => ({ ...v, [key]: value }))
     setFieldErrors(v => ({ ...v, [key]: undefined }))
   }
-  const runAction = (key: 'simulation' | 'optimization' | 'forecast' | 'risk', action: (isCurrent: () => boolean) => Promise<void>) => {
-    const snapshot = { selectionVersion: selectionVersion.current, operatingVersion: operatingVersion.current }
-    const isCurrent = () => isVersionCurrent(snapshot, {
+  const runAction = (key: ActionKey, action: (request: RequestContext) => Promise<void>) => {
+    const token = beginRequest(requestLifecycle.current, key, {
       selectionVersion: selectionVersion.current,
       operatingVersion: operatingVersion.current,
     })
+    const currentVersions = () => ({
+      selectionVersion: selectionVersion.current,
+      operatingVersion: operatingVersion.current,
+    })
+    const isCurrent = () => isRequestCurrent(requestLifecycle.current, token, currentVersions())
+    const adoptHydratedOperatingVersion = () => adoptCurrentOperatingVersion(requestLifecycle.current, token, currentVersions())
     setError(''); setFieldErrors({}); loading(key, true)
-    void action(isCurrent).catch(e => { if (isCurrent()) report(e) }).finally(() => { if (isCurrent()) loading(key, false) })
+    void action({ isCurrent, adoptCurrentOperatingVersion: adoptHydratedOperatingVersion }).catch(e => { if (isCurrent()) report(e) }).finally(() => { if (isCurrent()) loading(key, false) })
   }
-  const refreshHistory = async (isCurrent: () => boolean) => {
-    const records = await api.history(input.well_id)
+  const refreshHistory = async (wellId: string, isCurrent: () => boolean) => {
+    const records = await api.history(wellId)
     if (isCurrent()) setHistory(records)
   }
-  const runSimulation = () => runAction('simulation', async isCurrent => {
+  const runSimulation = () => runAction('simulation', async ({ isCurrent }) => {
+    const requestInput = input
     setTwinMode('current')
-    const result = await api.simulate(input)
+    const result = await api.simulate(requestInput)
     if (!isCurrent()) return
     setSimulation(result)
-    await refreshHistory(isCurrent)
+    await refreshHistory(requestInput.well_id, isCurrent)
   })
-  const runOptimization = () => runAction('optimization', async isCurrent => {
+  const runOptimization = () => runAction('optimization', async ({ isCurrent }) => {
+    const requestInput = input
     setOptimization(null)
-    const result = await api.optimize(input)
+    const result = await api.optimize(requestInput)
     if (!isCurrent()) return
     setOptimization(result)
-    await refreshHistory(isCurrent)
+    await refreshHistory(requestInput.well_id, isCurrent)
   })
   const runForecast = () => {
     if (!well) return
-    runAction('forecast', async isCurrent => {
+    runAction('forecast', async ({ isCurrent, adoptCurrentOperatingVersion }) => {
+      const requestWell = well
       setForecast(null)
-      const result = await api.forecast(well.well_name)
+      const result = await api.forecast(requestWell.well_name)
       if (!isCurrent()) return
       setForecast(result)
       // No automatic forecast POST on selection. A manually requested forecast
       // can supply missing observations without overwriting any user edits.
       if (needsObservation.current) {
-        const prefill = resolveWellInput(well, null, result)
+        const prefill = resolveWellInput(requestWell, null, result)
         needsObservation.current = !prefill.hasOperatingParameters
         const edits = new Set(editedFields.current)
         setInput(current => mergeUneditedInput(current, prefill.input, edits))
@@ -120,16 +135,24 @@ export default function App() {
           // Results computed for the previous defaults must not describe the
           // newly loaded operating state, including requests still in flight.
           operatingVersion.current += 1
+          // This forecast request intentionally caused the version bump by
+          // hydrating missing inputs, so let only this same request complete.
           setSimulation(null); setOptimization(null); setRisk(null); setTwinMode('current')
           setBusy(old => ({ ...old, simulation: false, optimization: false, risk: false }))
+          adoptCurrentOperatingVersion()
         }
       }
-      await refreshHistory(isCurrent)
+      await refreshHistory(requestWell.id, isCurrent)
     })
   }
   const runRisk = () => {
     if (!well) return
-    runAction('risk', async isCurrent => { setRisk(null); const result = await api.risk(input); if (isCurrent()) setRisk(result) })
+    runAction('risk', async ({ isCurrent }) => {
+      const requestInput = input
+      setRisk(null)
+      const result = await api.risk(requestInput)
+      if (isCurrent()) setRisk(result)
+    })
   }
   const selectingWell = busy.well || busy.history || input.well_id !== selectedId
   const visualizeRecommendation = () => { if (optimization) setTwinMode('optimized') }
