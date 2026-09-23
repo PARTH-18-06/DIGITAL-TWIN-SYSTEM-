@@ -13,6 +13,7 @@ import { SimulationPanel } from './components/SimulationPanel'
 import { SrpControls } from './components/SrpControls'
 import { WellConditions } from './components/WellConditions'
 import { WellSelector } from './components/WellSelector'
+import { isVersionCurrent } from './lib/dashboardState'
 import './styles.css'
 import type { ForecastResponse, RiskResponse } from './api/types'
 
@@ -28,6 +29,11 @@ export default function App() {
   const editedFields = useRef(new Set<keyof SimulationInput>())
   const needsObservation = useRef(true)
   const selectWell = (id: string) => { if (id !== selectedId) { selectionVersion.current += 1; setSelectedId(id) } }
+  const invalidateResults = () => {
+    operatingVersion.current += 1
+    setSimulation(null); setOptimization(null); setForecast(null); setRisk(null); setTwinMode('current')
+    setBusy(old => ({ ...old, simulation: false, optimization: false, forecast: false, risk: false }))
+  }
 
   useEffect(() => {
     let active = true
@@ -38,6 +44,7 @@ export default function App() {
   useEffect(() => {
     let active = true
     const version = ++selectionVersion.current
+    operatingVersion.current += 1
     editedFields.current = new Set()
     needsObservation.current = true
     setError(''); setFieldErrors({}); setWell(null); setHistory(null); setSimulation(null); setOptimization(null); setForecast(null); setRisk(null); setTwinMode('current')
@@ -62,11 +69,18 @@ export default function App() {
     }
     return () => { active = false; selectionVersion.current += 1 }
   }, [selectedId])
-  const update = (key: keyof SimulationInput, value: number) => { editedFields.current.add(key); setInput(v => ({ ...v, [key]: value })); setFieldErrors(v => ({ ...v, [key]: undefined })) }
+  const update = (key: keyof SimulationInput, value: number) => {
+    editedFields.current.add(key)
+    invalidateResults()
+    setInput(v => ({ ...v, [key]: value }))
+    setFieldErrors(v => ({ ...v, [key]: undefined }))
+  }
   const runAction = (key: 'simulation' | 'optimization' | 'forecast' | 'risk', action: (isCurrent: () => boolean) => Promise<void>) => {
-    const version = selectionVersion.current
-    const inputVersion = operatingVersion.current
-    const isCurrent = () => version === selectionVersion.current && (key === 'forecast' || inputVersion === operatingVersion.current)
+    const snapshot = { selectionVersion: selectionVersion.current, operatingVersion: operatingVersion.current }
+    const isCurrent = () => isVersionCurrent(snapshot, {
+      selectionVersion: selectionVersion.current,
+      operatingVersion: operatingVersion.current,
+    })
     setError(''); setFieldErrors({}); loading(key, true)
     void action(isCurrent).catch(e => { if (isCurrent()) report(e) }).finally(() => { if (isCurrent()) loading(key, false) })
   }

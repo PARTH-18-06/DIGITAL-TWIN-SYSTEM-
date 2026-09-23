@@ -78,3 +78,33 @@ def test_missing_forecast_artifacts_return_503(monkeypatch):
 
     assert response.status_code == 503
     assert "missing forecast model" in response.json()["detail"]
+
+
+def test_forecast_route_returns_422_when_history_is_unavailable(monkeypatch):
+    monkeypatch.setattr("app.routers.forecast.supabase_client.require_well_identifier",
+                        lambda well_id: {"id": "uuid-demo", "well_name": "DEMO-001 (synthetic)"})
+    monkeypatch.setattr("app.routers.forecast.supabase_client.list_observations_for_well",
+                        lambda well_id: [])
+    monkeypatch.setattr("app.routers.forecast.load_local_csv_observations",
+                        lambda well_name: (_ for _ in ()).throw(FileNotFoundError("no csv")))
+
+    response = TestClient(app).post("/api/forecast/next-day", json={"well_id": "DEMO-001 (synthetic)"})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "INSUFFICIENT_HISTORY"
+    assert "Insufficient observation history" in detail["message"]
+
+
+def test_forecast_route_preserves_observation_infrastructure_errors(monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr("app.routers.forecast.supabase_client.require_well_identifier",
+                        lambda well_id: {"id": "uuid-1", "well_name": "BGH-001"})
+    monkeypatch.setattr("app.routers.forecast.supabase_client.list_observations_for_well",
+                        lambda well_id: (_ for _ in ()).throw(HTTPException(status_code=502, detail="Supabase observations query failed")))
+
+    response = TestClient(app).post("/api/forecast/next-day", json={"well_id": "BGH-001"})
+
+    assert response.status_code == 502
+    assert "Supabase observations query failed" in response.json()["detail"]

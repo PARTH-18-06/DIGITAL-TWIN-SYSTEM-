@@ -64,3 +64,29 @@ def test_optimizer_response_shape_and_bounds(monkeypatch):
         api_field = optimizer.FEATURE_TO_API_FIELD[feature]
         value = result["recommendedParameters"][api_field]
         assert bounds[0] <= value <= bounds[1]
+
+
+def test_optimizer_exposes_iteration_limit_termination(monkeypatch):
+    monkeypatch.setattr(
+        optimizer,
+        "_load_models",
+        lambda: {target: FakeModel(index + 1) for index, target in enumerate(TARGET_COLUMNS)},
+    )
+
+    def fake_differential_evolution(objective, bounds, **kwargs):
+        midpoint = np.array([(lower + upper) / 2 for lower, upper in bounds])
+        objective(midpoint)
+        return SimpleNamespace(
+            x=midpoint,
+            success=False,
+            message="Maximum number of iterations has been exceeded.",
+        )
+
+    monkeypatch.setattr(optimizer, "differential_evolution", fake_differential_evolution)
+
+    result = optimizer.recommend_parameters("demo", VALID_STATE)
+    termination = result["predictions"]["optimizer"]
+
+    assert termination["success"] is False
+    assert termination["maxiter"] == optimizer.OPTIMIZER_MAXITER
+    assert "Maximum number of iterations" in termination["message"]

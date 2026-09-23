@@ -47,7 +47,7 @@ flowchart LR
 | Backend | Python, FastAPI, Pydantic, Uvicorn |
 | AI/ML | XGBoost, scikit-learn, SciPy, Pandas, NumPy, Joblib |
 | Database | Supabase, PostgreSQL |
-| Deployment | Vercel (frontend), Render (backend) |
+| Deployment | Vercel (frontend and backend), Supabase (database) |
 | Testing | Pytest, HTTPX, TypeScript/Vite production build |
 
 ## Project structure
@@ -68,7 +68,7 @@ sih/
 |   |-- supabase/migrations/  Database schema migrations
 |   `-- tests/                Backend test suite
 |-- ai_ml/                    Model-training resources and scripts
-`-- DEPLOYMENT.md             Render and Vercel deployment guide
+`-- DEPLOYMENT.md             Vercel deployment guide and Render alternative
 ```
 
 ## Prerequisites
@@ -190,10 +190,10 @@ pnpm run build
 The intended deployment is:
 
 - Frontend: Vercel
-- Backend: Render
+- Backend: Vercel FastAPI service (Render remains an alternative)
 - Database: hosted Supabase/PostgreSQL
 
-Follow [`DEPLOYMENT.md`](DEPLOYMENT.md) for the deployment order, environment variables, Render configuration, Vercel build settings, and free-tier cold-start caveat.
+Import the repository root into Vercel to deploy both services with `vercel.json`. Follow [`DEPLOYMENT.md`](DEPLOYMENT.md) for environment variables, verification, and the alternative Render setup.
 
 ## Data and engineering limitations
 
@@ -206,4 +206,3 @@ Follow [`DEPLOYMENT.md`](DEPLOYMENT.md) for the deployment order, environment va
 ## Repository
 
 GitHub: <https://github.com/PARTH-18-06/DIGITAL-TWIN-SYSTEM-.git>
-

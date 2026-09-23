@@ -1,6 +1,34 @@
 # Deployment Guide
 
-This repo is prepared for a Vercel frontend, a Render backend, and the already-hosted Supabase project.
+The root `vercel.json` deploys the React dashboard and FastAPI backend together using Vercel Services (currently beta). Supabase remains the hosted database. Render is an optional alternative backend host.
+
+## Deploy the whole application on Vercel
+
+1. Import this repository into Vercel, keeping the project Root Directory at the repository root (not `frontend/` or `backend/`). The checked-in configuration defines both services and their build settings.
+2. Add `SUPABASE_URL` and `SUPABASE_KEY` as server-side environment variables. Use the values from your existing backend configuration; never prefix these with `VITE_` or commit them.
+3. Leave `VITE_API_BASE_URL` unset or set it to `/`. Replace any existing Render or localhost override. Production requests use the same origin as the dashboard.
+4. Deploy. `/api/*`, `/health`, and API documentation routes go to FastAPI. Other requests go to the frontend.
+5. Verify `/health`, `/api/wells`, `/docs`, and `/models/well.glb` on the deployed domain, then exercise simulation, optimization, forecasting, risk, and history in the dashboard.
+
+For CLI deployment, run these commands from the repository root:
+
+```powershell
+pnpm dlx vercel@latest login
+pnpm dlx vercel@latest link
+pnpm dlx vercel@latest env add SUPABASE_URL production
+pnpm dlx vercel@latest env add SUPABASE_KEY production
+pnpm dlx vercel@latest deploy --prod
+```
+
+Set the same variables for Preview when using preview deployments. Enter secret values only at the CLI prompts or in the Vercel dashboard.
+
+The backend uses Python 3.13 and CPU-only XGBoost on Linux. Serialized model dependency versions are pinned. Models are included in deployment; raw training data, local environments, browser profiles, and presentation assets are excluded. Forecasting requires observations in Supabase because the local CSV development fallback is not deployed.
+
+The Python function has a 300-second maximum duration. Confirm the actual Linux bundle fits Vercel's standard 500 MB uncompressed limit in the deployment build; local Windows tests cannot establish that. Cold starts and optimization latency still need verification on the deployed service.
+
+References: [Vercel Services](https://vercel.com/docs/services), [Python runtime](https://vercel.com/docs/functions/runtimes/python).
+
+## Alternative: Vercel frontend and Render backend
 
 ## Order of operations
 
@@ -70,7 +98,7 @@ Required Vercel environment variable:
 |---|---|
 | `VITE_API_BASE_URL` | The public Render backend URL, for example `https://your-render-service.onrender.com`. |
 
-In local development, the frontend falls back to `http://127.0.0.1:8000`. In production, `VITE_API_BASE_URL` must be set so the deployed site cannot silently call localhost.
+In local development, the frontend falls back to `http://127.0.0.1:8000`. For a separate backend deployment, set `VITE_API_BASE_URL` to its public URL. For the combined Vercel deployment, leave it unset to use same-origin API requests.
 
 ## Supabase
 

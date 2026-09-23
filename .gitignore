@@ -1,4 +1,7 @@
 # Local secrets
+.vercel/
+chrome-snapshot-profile/
+ppt-assets/
 .env
 .env.*
 !.env.example

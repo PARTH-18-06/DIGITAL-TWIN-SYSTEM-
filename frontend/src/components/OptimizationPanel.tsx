@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { OptimizationResponse, SimulationInput } from '../api/types'
+import { optimizerTerminationNotice } from '../lib/dashboardState'
 
 type OptimizationTab = 'overview' | 'explanation' | 'technical'
 type NumericRow = [string, number | undefined, number | undefined]
@@ -37,6 +38,7 @@ export function OptimizationPanel({
   ], [current, result])
   const mainMetricRows = useMemo<NumericRow[]>(() => predictionRows(result), [result])
   const advisor = result ? buildAdvisor(current, result) : null
+  const termination = optimizerTerminationNotice(result?.predictions.optimizer)
 
   return (
     <section className="panel wide optimization-panel">
@@ -67,6 +69,7 @@ export function OptimizationPanel({
           <ResultTable caption="Recommended parameters" rows={rows} fallback="Run optimization" />
           {result && (
             <>
+              {termination && <OptimizerNotice notice={termination} />}
               <ResultTable caption="Main prediction changes" rows={mainMetricRows} />
               <button onClick={onVisualize}>Visualize Recommendation</button>
             </>
@@ -93,8 +96,10 @@ export function OptimizationPanel({
                 <TechnicalCard label="Objective score" value={`${format(result.predictions.current_score)} → ${format(result.predictions.recommended_score)}`} />
                 <TechnicalCard label="Model confidence" value={textOrDash(result.predictions.confidence)} />
                 <TechnicalCard label="Optimizer" value={textOrDash(String(result.predictions.optimizer?.method ?? ''))} />
+                <TechnicalCard label="Termination" value={textOrDash(String(result.predictions.optimizer?.message ?? ''))} />
                 <TechnicalCard label="Well ID" value={textOrDash(result.well_id)} />
               </div>
+              {termination && <OptimizerNotice notice={termination} />}
               {Object.keys(result.predictions.objective_weights ?? {}).length > 0 && (
                 <details className="technical-details">
                   <summary>Objective weights</summary>
@@ -108,6 +113,15 @@ export function OptimizationPanel({
         </div>
       )}
     </section>
+  )
+}
+
+function OptimizerNotice({ notice }: { notice: NonNullable<ReturnType<typeof optimizerTerminationNotice>> }) {
+  return (
+    <div className={`optimizer-notice ${notice.tone}`} role="note">
+      <strong>{notice.title}</strong>
+      <span>{notice.message}</span>
+    </div>
   )
 }
 

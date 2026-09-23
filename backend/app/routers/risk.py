@@ -36,7 +36,7 @@ def assess_risk(request: RiskRequest) -> dict:
         elif latest:
             state = _latest_to_current_state(latest)
         else:
-            raise HTTPException(status_code=422, detail="No observation history exists for this well.")
+            raise _insufficient_history(well_name)
         continuous = predict_outputs(state)
         output = classify_risks(state, continuous)
         return {"well_id": well["id"], **output}
@@ -67,13 +67,24 @@ def _latest_to_current_state(row: dict) -> dict:
 
 
 def _latest_observation(well_id: str, well_name: str) -> dict | None:
-    try:
-        observations = supabase_client.list_observations_for_well(well_id)
-    except HTTPException:
-        observations = []
+    observations = supabase_client.list_observations_for_well(well_id)
     if not observations:
-        observations = load_local_csv_observations(well_name)
+        try:
+            observations = load_local_csv_observations(well_name)
+        except FileNotFoundError:
+            observations = []
     return observations[-1] if observations else None
+
+
+def _insufficient_history(well_name: str) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={
+            "code": "INSUFFICIENT_HISTORY",
+            "message": f"Insufficient observation history for {well_name}. Run or import well_observations before history-based risk assessment.",
+            "reason": "No Supabase observations were found and the local development CSV fallback is unavailable or empty.",
+        },
+    )
 
 
 def _has_live_state(request: RiskRequest) -> bool:

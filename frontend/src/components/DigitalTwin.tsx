@@ -7,6 +7,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { summarizeAssessedRisk, type RiskSummary } from '../lib/dashboardState'
 
 type FlowDirection = 'forward' | 'reverse' | 'stalled'
 type RodMovementBehavior = 'normal' | 'floating_risk' | 'impact_risk'
@@ -77,7 +78,7 @@ type TwinVisualState = {
   steamIntensity: number
   warnings: string[]
   riskLevel: number
-  riskCategory: RiskCategory
+  riskSummary: RiskSummary
   production: number | null
   energyPerBarrel: number | null
   steamOilRatio: number | null
@@ -143,7 +144,13 @@ const DEFAULT_STATE: TwinVisualState = {
   steamIntensity: 0.35,
   warnings: ['Select a real BGH well and run simulation to animate live operating state.'],
   riskLevel: 0,
-  riskCategory: 'LOW',
+  riskSummary: {
+    score: null,
+    category: null,
+    statusLabel: 'Risk not assessed',
+    scoreLabel: 'Run risk assessment',
+    cssClass: 'unavailable',
+  },
   production: null,
   energyPerBarrel: null,
   steamOilRatio: null,
@@ -334,8 +341,9 @@ export function DigitalTwin(props: DigitalTwinProps) {
       </div>
 
       <div className="dt-risk-strip">
-        <span className={`dt-risk-pill ${activeVisualState.riskCategory.toLowerCase()}`}>
-          Max risk {activeVisualState.riskCategory} {Math.round(activeVisualState.riskLevel * 100)}%
+        <span className={`dt-risk-pill ${activeVisualState.riskSummary.cssClass}`}>
+          {activeVisualState.riskSummary.statusLabel}
+          {activeVisualState.riskSummary.score !== null ? ` - ${activeVisualState.riskSummary.scoreLabel}` : ''}
         </span>
         <span>Rod behavior: {activeVisualState.rodMovementBehavior.replace('_', ' ')}</span>
         <span>Pump {formatMetric(activeVisualState.pumpStrokeSpeed)} spm</span>
@@ -396,8 +404,8 @@ function deriveCurrentVisualState({ currentInput, optimization, risk, simulation
     rodStrokeAmplitude: simulation ? rodAmplitudeFromBehavior(simulation.rod_movement_behavior, null) : DEFAULT_STATE.rodStrokeAmplitude,
     rodMovementBehavior: simulation?.rod_movement_behavior ?? (riskSummary.category === 'HIGH' ? 'impact_risk' : DEFAULT_STATE.rodMovementBehavior),
     warnings: simulation ? simulation.warnings : DEFAULT_STATE.warnings,
-    riskLevel: riskSummary.score,
-    riskCategory: riskSummary.category,
+    riskLevel: riskSummary.score ?? DEFAULT_STATE.riskLevel,
+    riskSummary,
     production,
     energyPerBarrel,
     steamOilRatio,
@@ -410,7 +418,7 @@ function deriveOptimizedVisualState({ optimization, well }: DigitalTwinProps, cu
   const predictions = optimization?.predictions.recommended
   const production = readNumber(predictions, 'oil_production', 'predicted_oil_flow_rate', 'oil_flow_rate') ?? current.production
   const signedFlowSpeed = production !== null ? productionToDemoFlowSpeed(production) : current.signedFlowSpeed
-  const riskSummary = summarizePredictionRisk(predictions, current.riskLevel, current.riskCategory)
+  const riskSummary = summarizePredictionRisk(predictions, current.riskLevel, current.riskSummary.category)
   const injectionPressure = recommended?.steam_injection_pressure ?? current.injectionPressure
   const steamVolume = recommended?.steam_volume ?? current.steamVolume
   const pumpStrokeSpeed = recommended?.rpm_or_spm ?? current.pumpStrokeSpeed
@@ -437,8 +445,8 @@ function deriveOptimizedVisualState({ optimization, well }: DigitalTwinProps, cu
     rodStrokeAmplitude: rodAmplitudeFromBehavior(current.rodMovementBehavior, strokeLength),
     steamIntensity,
     warnings,
-    riskLevel: riskSummary.score,
-    riskCategory: riskSummary.category,
+    riskLevel: riskSummary.score ?? current.riskLevel,
+    riskSummary,
     production,
     energyPerBarrel: readNumber(predictions, 'energy_per_barrel') ?? current.energyPerBarrel,
     steamOilRatio: readNumber(predictions, 'steam_oil_ratio', 'sor') ?? current.steamOilRatio,
@@ -809,7 +817,7 @@ function applyVisualState(twin: TwinScene | null, state: TwinVisualState) {
   if (!twin) return
   const tempColor = new THREE.Color('#3f78c8').lerp(new THREE.Color('#ff7a35'), state.temperatureValue)
   const pressureColor = new THREE.Color('#1e6f72').lerp(new THREE.Color('#c7df78'), state.pressureIntensity)
-  const riskColor = state.riskCategory === 'HIGH' ? '#f05c3f' : state.riskCategory === 'MEDIUM' ? '#f4b740' : '#c7df78'
+  const riskColor = state.riskSummary.category === 'HIGH' ? '#f05c3f' : state.riskSummary.category === 'MEDIUM' ? '#f4b740' : state.riskSummary.category === 'LOW' ? '#c7df78' : '#8eaa9d'
 
   tintObject(twin.handles.reservoir, tempColor, 0.14)
   tintObject(twin.handles.pressureShell, pressureColor, 0.45, 0.16 + state.pressureIntensity * 0.42)
@@ -995,23 +1003,27 @@ function isMesh(object: THREE.Object3D): object is THREE.Mesh {
   return 'isMesh' in object
 }
 
-function summarizeLiveRisk(risk: DigitalTwinProps['risk']) {
-  if (!risk) return { score: 0, category: 'LOW' as RiskCategory }
-  return Object.values(risk).reduce(
-    (acc, item) => (item.risk_score > acc.score ? { score: clamp01(item.risk_score), category: item.category } : acc),
-    { score: 0, category: 'LOW' as RiskCategory },
-  )
+function summarizeLiveRisk(risk: DigitalTwinProps['risk']): RiskSummary {
+  return summarizeAssessedRisk(risk)
 }
 
-function summarizePredictionRisk(predictions: Record<string, number> | undefined, fallbackScore: number, fallbackCategory: RiskCategory) {
+function summarizePredictionRisk(predictions: Record<string, number> | undefined, fallbackScore: number, fallbackCategory: RiskCategory | null): RiskSummary {
   const values = [
     readNumber(predictions, 'rod_floating_risk'),
     readNumber(predictions, 'impact_loading_risk'),
     readNumber(predictions, 'pump_unsetting_risk'),
     readNumber(predictions, 'rod_failure_risk'),
   ].filter((value): value is number => value !== null)
+  if (!values.length && fallbackCategory === null) return DEFAULT_STATE.riskSummary
   const score = values.length ? clamp01(Math.max(...values)) : fallbackScore
-  return { score, category: riskCategory(score) ?? fallbackCategory }
+  const category = riskCategory(score) ?? fallbackCategory
+  return {
+    score,
+    category,
+    statusLabel: category ? `Predicted risk ${category}` : 'Risk not assessed',
+    scoreLabel: `predicted score ${Math.round(score * 100)}%`,
+    cssClass: category ? category.toLowerCase() as Lowercase<RiskCategory> : 'unavailable',
+  }
 }
 
 function riskCategory(score: number): RiskCategory {
@@ -1020,7 +1032,8 @@ function riskCategory(score: number): RiskCategory {
   return 'LOW'
 }
 
-function riskWarnings(score: number, category: RiskCategory) {
+function riskWarnings(score: number | null, category: RiskCategory | null) {
+  if (score === null || category === null) return []
   if (category === 'HIGH') return [`Recommended case still has elevated synthetic risk (${Math.round(score * 100)}%).`]
   if (category === 'MEDIUM') return [`Recommended case has medium synthetic risk (${Math.round(score * 100)}%).`]
   return []

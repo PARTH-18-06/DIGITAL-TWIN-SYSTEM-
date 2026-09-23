@@ -1,0 +1,14 @@
+.git
+.vercel
+**/.env
+**/.env.*
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/*.log
+backend/data
+ai_ml
+chrome-snapshot-profile
+ppt-assets

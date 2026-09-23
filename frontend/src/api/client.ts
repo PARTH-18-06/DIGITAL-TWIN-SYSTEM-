@@ -8,14 +8,16 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  if (!BASE_URL) throw new ApiError('VITE_API_BASE_URL is required in production.', 0)
   try {
     const response = await fetch(`${BASE_URL}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } })
     if (!response.ok) {
       const body = await response.json().catch(() => ({ detail: response.statusText }))
       const details = Array.isArray(body.detail) ? body.detail : []
       const fields = Object.fromEntries(details.filter((item: { loc?: string[] }) => item.loc?.[0] === 'body').map((item: { loc: string[]; msg: string }) => [item.loc.at(-1), item.msg]))
-      const message = typeof body.detail === 'string' ? body.detail : details.map((item: { loc?: string[]; msg: string }) => `${item.loc?.at(-1)}: ${item.msg}`).join('; ') || `Request failed (${response.status})`
+      const structuredMessage = typeof body.detail?.message === 'string' ? body.detail.message : ''
+      const message = typeof body.detail === 'string'
+        ? body.detail
+        : structuredMessage || details.map((item: { loc?: string[]; msg: string }) => `${item.loc?.at(-1)}: ${item.msg}`).join('; ') || `Request failed (${response.status})`
       throw new ApiError(message, response.status, fields)
     }
     return response.json() as Promise<T>
