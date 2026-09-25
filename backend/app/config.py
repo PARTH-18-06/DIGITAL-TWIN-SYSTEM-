@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from threading import local
 
@@ -12,6 +13,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     supabase_url: str | None = None
     supabase_key: str | None = None
+    allow_local_csv_import: bool = False
+    environment: str = "development"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
@@ -28,6 +31,16 @@ class Settings(BaseSettings):
             and "your-project" not in self.supabase_url
             and not self.supabase_key.startswith("your-")
         )
+
+    @property
+    def csv_import_writes_enabled(self) -> bool:
+        """Allow local CSV writes only on an explicitly enabled non-production backend."""
+        production_like = (
+            self.environment.lower() in {"prod", "production"}
+            or bool(os.getenv("RENDER"))
+            or bool(os.getenv("VERCEL"))
+        )
+        return self.allow_local_csv_import and not production_like
 
 
 @lru_cache

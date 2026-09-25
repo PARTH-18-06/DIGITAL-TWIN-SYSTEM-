@@ -94,4 +94,65 @@ export interface SimulationRun { id: string; well_id: string; input_parameters: 
 export interface OptimizationRun { id: string; well_id: string; current_parameters: SimulationInput & { oil_api?: number }; recommended_parameters: OptimizationResponse['recommendedParameters']; predicted_results: OptimizationResponse['predictions']; created_at: string }
 export interface ForecastRun { id: string; well_id: string; forecast_date: string; input_snapshot: Record<string, unknown>; predicted_oil_production: number; risk_output: Record<string, unknown>; model_metadata: Record<string, unknown>; created_at: string }
 export interface HistoryResponse { well_id: string; simulation_runs: SimulationRun[]; optimization_runs: OptimizationRun[]; forecast_runs: ForecastRun[] }
+export interface ObservationRecord {
+  well_id: string
+  well_name?: string
+  date: string
+  reservoir_temperature?: number | null
+  reservoir_pressure?: number | null
+  oil_production?: number | null
+  oil_flow_rate?: number | null
+  steam_volume?: number | null
+  injection_pressure?: number | null
+  rod_floating_risk?: number | null
+  impact_loading_risk?: number | null
+  pump_unsetting_risk?: number | null
+  rod_failure_risk?: number | null
+  observation_source?: string | null
+  dataset_identifier?: string | null
+  data_kind?: 'synthetic_sample' | 'field_measurement' | string | null
+  field_validated?: boolean | null
+  [key: string]: unknown
+}
+export interface ObservationsResponse { well_id: string; observations: ObservationRecord[] }
+export interface ObservationImportIssue { row: number; field: string; message: string }
+export interface ObservationImportPayload {
+  csv_text: string
+  dataset_id: string
+  source: string
+  data_kind: 'synthetic_sample' | 'field_measurement'
+}
+export interface ObservationImportPreview {
+  dataset_id: string
+  source: string
+  data_kind: 'synthetic_sample' | 'field_measurement'
+  field_validated: boolean
+  total_rows: number
+  valid_rows: number
+  importable_rows: number
+  duplicate_rows: number
+  error_count: number
+  warning_count: number
+  errors: ObservationImportIssue[]
+  warnings: ObservationImportIssue[]
+  preview_rows: Record<string, unknown>[]
+  template_columns: string[]
+  required_columns: string[]
+  optional_columns: string[]
+}
+export interface ObservationImportCommitResponse extends ObservationImportPreview {
+  imported_rows: number
+  skipped_rows: number
+  rejected_rows: number
+  upload_id: string
+  uploaded_at: string
+  persistence_status: string
+}
+export interface ObservationImportRules {
+  writes_enabled: boolean
+  write_protection_message: string
+  required_columns: string[]
+  optional_columns: string[]
+  [key: string]: unknown
+}
 export type FieldErrors = Partial<Record<keyof SimulationInput, string>>

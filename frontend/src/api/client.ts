@@ -1,4 +1,4 @@
-import type { FieldErrors, ForecastResponse, HistoryResponse, OptimizationResponse, RiskResponse, SimulationInput, SimulationResponse, Well } from './types'
+import type { FieldErrors, ForecastResponse, HistoryResponse, ObservationImportCommitResponse, ObservationImportPayload, ObservationImportPreview, ObservationImportRules, ObservationsResponse, OptimizationResponse, RiskResponse, SimulationInput, SimulationResponse, Well } from './types'
 
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL
 const BASE_URL = (configuredBaseUrl || (import.meta.env.DEV ? 'http://127.0.0.1:8000' : '')).replace(/\/$/, '')
@@ -38,4 +38,10 @@ export const api = {
     body: JSON.stringify(typeof input === 'string' ? { well_id: input } : input),
   }),
   history: (id: string) => request<HistoryResponse>(`/api/history/${encodeURIComponent(id)}`),
+  observations: (id: string, limit = 180) => request<ObservationsResponse>(`/api/history/${encodeURIComponent(id)}/observations?limit=${encodeURIComponent(String(limit))}`),
+  importRules: () => request<ObservationImportRules>('/api/import/observations/rules'),
+  importTemplateUrl: () => `${BASE_URL}/api/import/observations/template.csv`,
+  importSyntheticSampleUrl: () => `${BASE_URL}/api/import/observations/synthetic-sample.csv`,
+  dryRunObservationImport: (payload: ObservationImportPayload) => request<ObservationImportPreview>('/api/import/observations/dry-run', { method: 'POST', body: JSON.stringify(payload) }),
+  confirmObservationImport: (payload: ObservationImportPayload) => request<ObservationImportCommitResponse>('/api/import/observations/confirm', { method: 'POST', body: JSON.stringify(payload) }),
 }

@@ -177,3 +177,51 @@ class HistoryResponse(BaseModel):
     simulation_runs: list[dict[str, Any]]
     optimization_runs: list[dict[str, Any]]
     forecast_runs: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ObservationsResponse(BaseModel):
+    well_id: str
+    observations: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ObservationImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    csv_text: str = Field(min_length=1, description="CSV file contents decoded as UTF-8 text.")
+    dataset_id: str = Field(min_length=1, max_length=80)
+    source: str = Field(min_length=1, max_length=120)
+    data_kind: Literal["synthetic_sample", "field_measurement"] = "field_measurement"
+
+
+class ObservationImportIssue(BaseModel):
+    row: int
+    field: str
+    message: str
+
+
+class ObservationImportPreview(BaseModel):
+    dataset_id: str
+    source: str
+    data_kind: Literal["synthetic_sample", "field_measurement"]
+    field_validated: bool = False
+    total_rows: int
+    valid_rows: int
+    importable_rows: int
+    duplicate_rows: int
+    error_count: int
+    warning_count: int
+    errors: list[ObservationImportIssue]
+    warnings: list[ObservationImportIssue]
+    preview_rows: list[dict[str, Any]]
+    template_columns: list[str]
+    required_columns: list[str]
+    optional_columns: list[str]
+
+
+class ObservationImportCommitResponse(ObservationImportPreview):
+    imported_rows: int
+    skipped_rows: int
+    rejected_rows: int
+    upload_id: str
+    uploaded_at: str
+    persistence_status: str

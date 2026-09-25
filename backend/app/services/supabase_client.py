@@ -91,6 +91,27 @@ def list_observations_for_well(well_id: str, limit: int = 64) -> list[dict[str, 
         raise HTTPException(status_code=502, detail=f"Supabase observations query failed: {exc.message}") from exc
 
 
+def list_observation_keys(well_ids: list[str]) -> set[tuple[str, str]]:
+    if not well_ids:
+        return set()
+    try:
+        rows = (_client().table("well_observations").select("well_id,observed_at")
+                .in_("well_id", well_ids).execute().data or [])
+        return {(str(row["well_id"]), str(row["observed_at"])) for row in rows}
+    except APIError as exc:
+        raise HTTPException(status_code=502, detail=f"Supabase observations query failed: {exc.message}") from exc
+
+
+def insert_observations(rows: list[dict[str, Any]]) -> int:
+    if not rows:
+        return 0
+    try:
+        _client().table("well_observations").insert(rows).execute()
+        return len(rows)
+    except APIError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not import observations: {exc.message}") from exc
+
+
 def save_forecast(
     well_id: str,
     forecast_date: str,

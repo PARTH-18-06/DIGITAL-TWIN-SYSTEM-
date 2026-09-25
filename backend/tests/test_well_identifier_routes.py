@@ -67,6 +67,27 @@ def test_history_unknown_identifier_returns_404(monkeypatch):
     assert "NOPE-999" in response.json()["detail"]
 
 
+def test_observations_accepts_well_name_and_bounds_limit(monkeypatch):
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr("app.routers.history.supabase_client.require_well_identifier", resolve_known_well)
+
+    def fake_observations(well_id: str, limit: int) -> list[dict]:
+        calls.append((well_id, limit))
+        return [
+            {"well_id": WELL_UUID, "date": "2023-08-22", "oil_production": 17.2},
+            {"well_id": WELL_UUID, "date": "2023-08-23", "oil_production": None},
+        ]
+
+    monkeypatch.setattr("app.routers.history.supabase_client.list_observations_for_well", fake_observations)
+
+    response = TestClient(app).get(f"/api/history/{WELL_NAME}/observations?limit=5000")
+
+    assert response.status_code == 200
+    assert response.json()["well_id"] == WELL_UUID
+    assert response.json()["observations"][0]["date"] == "2023-08-22"
+    assert calls == [(WELL_UUID, 1000)]
+
+
 def test_simulation_accepts_well_name_and_uuid_and_saves_resolved_uuid(monkeypatch):
     saved_inputs: list[dict] = []
 

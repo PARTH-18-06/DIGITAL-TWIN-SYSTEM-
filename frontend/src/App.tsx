@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from './api/client'
 import { DEFAULT_INPUT, mergeUneditedInput, resolveWellInput } from './api/wellInput'
-import type { FieldErrors, HistoryResponse, OptimizationResponse, SimulationInput, SimulationResponse, Well } from './api/types'
+import type { FieldErrors, HistoryResponse, ObservationRecord, OptimizationResponse, SimulationInput, SimulationResponse, Well } from './api/types'
 import { CssControls } from './components/CssControls'
 import { DigitalTwin, type DigitalTwinProps, type TwinMode } from './components/DigitalTwin'
 import { HistoryPanel } from './components/HistoryPanel'
+import { HistoricalCharts } from './components/HistoricalCharts'
 import { NextDayForecast, currentProductionFromOptimization } from './components/NextDayForecast'
+import { ObservationImportPanel } from './components/ObservationImportPanel'
 import { OptimizationPanel } from './components/OptimizationPanel'
 import { PredictionDisplay } from './components/PredictionDisplay'
 import { RiskAssessment } from './components/RiskAssessment'
 import { SimulationPanel } from './components/SimulationPanel'
 import { SrpControls } from './components/SrpControls'
+import { WhatIfPanel } from './components/WhatIfPanel'
 import { WellConditions } from './components/WellConditions'
 import { WellSelector } from './components/WellSelector'
 import { adoptCurrentOperatingVersion, beginRequest, createRequestLifecycleState, isRequestCurrent } from './lib/dashboardState'
@@ -26,8 +29,9 @@ type RequestContext = {
 export default function App() {
   const [wells, setWells] = useState<Well[]>([]), [selectedId, setSelectedId] = useState(''), [well, setWell] = useState<Well | null>(null)
   const [input, setInput] = useState(DEFAULT_INPUT), [simulation, setSimulation] = useState<SimulationResponse | null>(null), [optimization, setOptimization] = useState<OptimizationResponse | null>(null), [history, setHistory] = useState<HistoryResponse | null>(null)
+  const [observations, setObservations] = useState<ObservationRecord[]>([]), [observationError, setObservationError] = useState('')
   const [forecast, setForecast] = useState<ForecastResponse | null>(null), [risk, setRisk] = useState<RiskResponse | null>(null), [twinMode, setTwinMode] = useState<TwinMode>('current')
-  const [busy, setBusy] = useState({ wells: true, well: false, simulation: false, optimization: false, forecast: false, risk: false, history: false }), [error, setError] = useState(''), [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const [busy, setBusy] = useState({ wells: true, well: false, simulation: false, optimization: false, forecast: false, risk: false, history: false, observations: false }), [error, setError] = useState(''), [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const loading = (key: keyof typeof busy, value: boolean) => setBusy(old => ({ ...old, [key]: value }))
   const report = (e: unknown) => { const err = e instanceof ApiError ? e : new ApiError('Unexpected error', 0); setError(err.message); setFieldErrors(err.fieldErrors) }
   const selectionVersion = useRef(0)
@@ -54,15 +58,20 @@ export default function App() {
     operatingVersion.current += 1
     editedFields.current = new Set()
     needsObservation.current = true
-    setError(''); setFieldErrors({}); setWell(null); setHistory(null); setSimulation(null); setOptimization(null); setForecast(null); setRisk(null); setTwinMode('current')
+    setError(''); setFieldErrors({}); setObservationError(''); setWell(null); setHistory(null); setObservations([]); setSimulation(null); setOptimization(null); setForecast(null); setRisk(null); setTwinMode('current')
     // Always reset, including optional fields and edits belonging to another well.
     setInput({ ...DEFAULT_INPUT, well_id: selectedId })
-    setBusy(old => ({ ...old, well: Boolean(selectedId), history: Boolean(selectedId), simulation: false, optimization: false, forecast: false, risk: false }))
+    setBusy(old => ({ ...old, well: Boolean(selectedId), history: Boolean(selectedId), observations: Boolean(selectedId), simulation: false, optimization: false, forecast: false, risk: false }))
     if (selectedId) {
-      Promise.allSettled([api.well(selectedId), api.history(selectedId)]).then(([wellResult, historyResult]) => {
+      Promise.allSettled([api.well(selectedId), api.history(selectedId), api.observations(selectedId)]).then(([wellResult, historyResult, observationsResult]) => {
         if (!active || version !== selectionVersion.current) return
         const selectedHistory = historyResult.status === 'fulfilled' ? historyResult.value : null
         setHistory(selectedHistory)
+        if (observationsResult.status === 'fulfilled') {
+          setObservations(observationsResult.value.observations)
+        } else {
+          setObservationError(observationsResult.reason instanceof ApiError ? observationsResult.reason.message : 'Observation history unavailable')
+        }
         if (wellResult.status === 'fulfilled') {
           setWell(wellResult.value)
           const prefill = resolveWellInput(wellResult.value, selectedHistory)
@@ -71,7 +80,7 @@ export default function App() {
           setInput(current => mergeUneditedInput(current, prefill.input, edits))
         } else report(wellResult.reason)
         if (historyResult.status === 'rejected') report(historyResult.reason)
-        loading('well', false); loading('history', false)
+        loading('well', false); loading('history', false); loading('observations', false)
       })
     }
     return () => { active = false; selectionVersion.current += 1 }
@@ -81,6 +90,12 @@ export default function App() {
     invalidateResults()
     setInput(v => ({ ...v, [key]: value }))
     setFieldErrors(v => ({ ...v, [key]: undefined }))
+  }
+  const applyScenario = (scenarioInput: SimulationInput) => {
+    editedFields.current = new Set(Object.keys(scenarioInput) as (keyof SimulationInput)[])
+    invalidateResults()
+    setInput({ ...scenarioInput, well_id: selectedId })
+    setFieldErrors({})
   }
   const runAction = (key: ActionKey, action: (request: RequestContext) => Promise<void>) => {
     const token = beginRequest(requestLifecycle.current, key, {
@@ -99,6 +114,20 @@ export default function App() {
   const refreshHistory = async (wellId: string, isCurrent: () => boolean) => {
     const records = await api.history(wellId)
     if (isCurrent()) setHistory(records)
+  }
+  const refreshSelectedHistory = async () => {
+    if (!selectedId) return
+    loading('history', true); loading('observations', true); setObservationError('')
+    try {
+      const [historyRecords, observationRecords] = await Promise.all([api.history(selectedId), api.observations(selectedId)])
+      setHistory(historyRecords)
+      setObservations(observationRecords.observations)
+    } catch (error) {
+      report(error)
+      setObservationError(error instanceof ApiError ? error.message : 'Observation history unavailable')
+    } finally {
+      loading('history', false); loading('observations', false)
+    }
   }
   const runSimulation = () => runAction('simulation', async ({ isCurrent }) => {
     const requestInput = input
@@ -171,9 +200,12 @@ export default function App() {
       </div>
     </div>
     <PredictionDisplay result={simulation} />
+    <WhatIfPanel input={input} disabled={!selectedId || selectingWell} onApply={applyScenario} />
     <NextDayForecast currentProduction={currentProductionFromOptimization(optimization)} result={forecast} loading={busy.forecast} disabled={selectingWell || !well?.well_name.startsWith('BGH-')} onRun={runForecast} />
     <RiskAssessment result={risk} loading={busy.risk} disabled={selectingWell || !well?.well_name.startsWith('BGH-')} onRun={runRisk} />
     <OptimizationPanel current={input} result={optimization} loading={busy.optimization} disabled={!selectedId || selectingWell} onRun={runOptimization} onVisualize={visualizeRecommendation} />
+    <ObservationImportPanel disabled={selectingWell || busy.observations || busy.history} onImported={refreshSelectedHistory} />
+    <HistoricalCharts observations={observations} history={history} loading={busy.observations || busy.history} error={observationError} />
     <HistoryPanel history={history} loading={busy.history} />
   </main>
 }
